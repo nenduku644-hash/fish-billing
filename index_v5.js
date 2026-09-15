@@ -83,7 +83,7 @@ globalSettings = {};
   window.archiveCancelledInvoice = function(invoiceRecord, reason = "Cancelled") {
     try {
       if (!invoiceRecord) return;
-      const cancelled = [] /* [CLOUD-ONLY] */;
+      const cancelled = JSON.parse(localStorage.getItem("cancelled_invoices") || "[]");
       const id = String(invoiceRecord.id || `inv_${invoiceRecord.invoiceNo}`).trim();
       const token = String(invoiceRecord.qrToken || invoiceRecord.details?.qrToken || "").trim();
       const invNo = String(invoiceRecord.invoiceNo || invoiceRecord.details?.invoiceNo || "").trim();
@@ -105,7 +105,7 @@ globalSettings = {};
       };
 
       const updated = [entry, ...cancelled.filter(c => c && c.id !== id && (!token || c.token !== token))].slice(0, 300);
-      /* [CLOUD-ONLY] No local storage for cancelled_invoices */
+      localStorage.setItem("cancelled_invoices", JSON.stringify(updated));
 
       if (typeof pushDirectToGoogleDatabase === 'function') {
         pushDirectToGoogleDatabase("archive_cancelled_invoice", { cancelledRecord: entry });
@@ -118,7 +118,7 @@ globalSettings = {};
   // Deleted Invoice Tombstone Management (Zero-Resurrection Engine with Active-Invoice Immunity)
   window.getDeletedInvoiceTombstones = function() {
     try {
-      const raw = [] /* [CLOUD-ONLY] */;
+      const raw = JSON.parse(localStorage.getItem("deleted_invoice_ids") || "[]");
       return Array.isArray(raw) ? raw : [];
     } catch (e) {
       return [];
@@ -150,7 +150,7 @@ globalSettings = {};
       });
 
       if (tombstones.length !== beforeLen) {
-        /* [CLOUD-ONLY] No local storage for deleted_invoice_ids */
+        localStorage.setItem("deleted_invoice_ids", JSON.stringify(tombstones));
       }
     } catch (e) {
       console.warn("clearInvoiceTombstone error:", e);
@@ -196,7 +196,7 @@ globalSettings = {};
       });
 
       if (changed) {
-        /* [CLOUD-ONLY] No local storage for deleted_invoice_ids */
+        localStorage.setItem("deleted_invoice_ids", JSON.stringify(tombstones));
       }
     } catch (e) {
       console.warn("reconcileTombstonesWithActiveInvoices error:", e);
@@ -253,7 +253,7 @@ globalSettings = {};
       window.reconcileTombstonesWithActiveInvoices(invoices);
     }
     const tombstones = window.getDeletedInvoiceTombstones();
-    const clearedAt = parseInt(null /* [CLOUD-ONLY] no local database_history_cleared_at */ || "0", 10);
+    const clearedAt = parseInt(localStorage.getItem("database_history_cleared_at") || "0", 10);
 
     return invoices.filter(inv => {
       if (!inv) return false;
@@ -311,11 +311,11 @@ globalSettings = {};
     ['0201', '0102', '201', '102', 'inv_201', 'inv_102', '#0201', '#0102', '0099', '#0099', '99', 'inv_0099'].forEach(phantom => {
       if (!curTombstones.includes(phantom)) curTombstones.push(phantom);
     });
-    /* [CLOUD-ONLY] No local storage for deleted_invoice_ids */
+    localStorage.setItem("deleted_invoice_ids", JSON.stringify(curTombstones));
   } catch (e) {}
 
   invoicesDb = window.filterOutDeletedInvoices(invoicesDb);
-  /* [CLOUD-ONLY] No local storage for invoices */
+  try { localStorage.setItem("invoices", JSON.stringify(invoicesDb)); } catch (e) {}
 // XSS Defense Helper
 function escapeHtml(str) {
   if (str === null || str === undefined) return '';
@@ -550,17 +550,19 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
       window.recentProductMutations[desc.trim().toLowerCase()] = nowMs;
     }
     try {
-      let storedMut = [] /* [CLOUD-ONLY] */;
+      let storedMut = JSON.parse(localStorage.getItem("recent_product_mutations") || "{}");
       storedMut[targetId] = nowMs;
       if (desc) {
         storedMut[desc] = nowMs;
         storedMut[desc.trim().toLowerCase()] = nowMs;
       }
-      /* [CLOUD-ONLY] No local storage for recent_product_mutations */
+      localStorage.setItem("recent_product_mutations", JSON.stringify(storedMut));
     } catch(e){}
 
-    /* [CLOUD-ONLY] No local storage for products */
-    /* [CLOUD-ONLY] No IndexedDB */if (typeof updateProductDomRowFast === 'function') {
+    try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch (e) {}
+    if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllProducts(productsDb);
+
+    if (typeof updateProductDomRowFast === 'function') {
       updateProductDomRowFast(targetId, newStock, newStatus);
     } else if (typeof renderProductsTable === 'function') {
       renderProductsTable(productsDb);
@@ -605,13 +607,13 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
           window.recentProductMutations[desc.trim().toLowerCase()] = nowMs;
         }
         try {
-          let storedMut = [] /* [CLOUD-ONLY] */;
+          let storedMut = JSON.parse(localStorage.getItem("recent_product_mutations") || "{}");
           storedMut[targetId] = nowMs;
           if (desc) {
             storedMut[desc] = nowMs;
             storedMut[desc.trim().toLowerCase()] = nowMs;
           }
-          /* [CLOUD-ONLY] No local storage for recent_product_mutations */
+          localStorage.setItem("recent_product_mutations", JSON.stringify(storedMut));
         } catch(e){}
 
         if (typeof updateProductDomRowFast === 'function') {
@@ -622,8 +624,9 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
       productsDb = msg.products;
       if (typeof renderProductsTable === 'function') renderProductsTable(productsDb);
     }
-    /* [CLOUD-ONLY] No local storage for products */
-    /* [CLOUD-ONLY] No IndexedDB */if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
+    try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch (e) {}
+    if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllProducts(productsDb);
+    if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
     if (typeof updateDashboardOverview === 'function') updateDashboardOverview();
     window.lastSyncTimeMs = Date.now();
     if (typeof window.updateRealtimePresenceHUD === 'function') window.updateRealtimePresenceHUD("live");
@@ -645,8 +648,9 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
         window.recentProductMutations[prod.description] = nowMs;
         window.recentProductMutations[prod.description.trim().toLowerCase()] = nowMs;
       }
-      /* [CLOUD-ONLY] No local storage for products */
-      /* [CLOUD-ONLY] No IndexedDB */if (typeof renderProductsTable === 'function') renderProductsTable(productsDb);
+      try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch (e) {}
+      if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllProducts(productsDb);
+      if (typeof renderProductsTable === 'function') renderProductsTable(productsDb);
       if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
     }
     return;
@@ -660,8 +664,10 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
     if (idx > -1) invoicesDb[idx] = inv;
     else invoicesDb.push(inv);
     invoicesDb.sort((a, b) => String(a.invoiceNo || "").localeCompare(String(b.invoiceNo || "")));
-    /* [CLOUD-ONLY] No local storage for invoices */
-    /* [CLOUD-ONLY] No IndexedDB */// Synchronize stock deduction instantly
+    try { localStorage.setItem("invoices", JSON.stringify(invoicesDb)); } catch (e) {}
+    if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveInvoice(inv);
+
+    // Synchronize stock deduction instantly
     if (Array.isArray(msg.stockDeltas)) {
       msg.stockDeltas.forEach(delta => {
         const prod = productsDb.find(p => p && (p.id === delta.productId || (p.description && delta.description && p.description.trim().toLowerCase() === delta.description.trim().toLowerCase())));
@@ -686,35 +692,38 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
           window.recentProductMutations[desc.trim().toLowerCase()] = nowMs;
         }
         try {
-          let storedMut = [] /* [CLOUD-ONLY] */;
+          let storedMut = JSON.parse(localStorage.getItem("recent_product_mutations") || "{}");
           storedMut[targetId] = nowMs;
           if (desc) {
             storedMut[desc] = nowMs;
             storedMut[desc.trim().toLowerCase()] = nowMs;
           }
-          /* [CLOUD-ONLY] No local storage for recent_product_mutations */
+          localStorage.setItem("recent_product_mutations", JSON.stringify(storedMut));
         } catch(e){}
 
         if (typeof updateProductDomRowFast === 'function') {
           updateProductDomRowFast(targetId, newStock, newStatus);
         }
       });
-      /* [CLOUD-ONLY] No local storage for products */
-      /* [CLOUD-ONLY] No IndexedDB */if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
+      try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch (e) {}
+      if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllProducts(productsDb);
+      if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
     } else if (Array.isArray(msg.products) && msg.products.length > 0) {
       productsDb = msg.products;
-      /* [CLOUD-ONLY] No local storage for products */
-      /* [CLOUD-ONLY] No IndexedDB */if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
+      try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch (e) {}
+      if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllProducts(productsDb);
+      if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
       if (typeof loadProductsDatabaseTable === 'function') loadProductsDatabaseTable();
     }
 
     // Synchronize new party if included in packet
     if (Array.isArray(msg.parties) && msg.parties.length > 0) {
       let _dpi = [];
-      try { _dpi = JSON.parse(null /* [CLOUD-ONLY] no local deleted_party_ids */) || []; } catch(e){}
+      try { _dpi = JSON.parse(localStorage.getItem("deleted_party_ids")) || []; } catch(e){}
       partiesDb = msg.parties.filter(p => p && !_dpi.includes(p.id) && !_dpi.includes(p.name));
-      /* [CLOUD-ONLY] No local storage for parties */
-      /* [CLOUD-ONLY] No IndexedDB */if (typeof loadPartiesDatabaseLists === 'function') loadPartiesDatabaseLists();
+      try { localStorage.setItem("parties", JSON.stringify(partiesDb)); } catch (e) {}
+      if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllParties(partiesDb);
+      if (typeof loadPartiesDatabaseLists === 'function') loadPartiesDatabaseLists();
     }
 
     if (typeof renderHistoryTableRows === 'function') renderHistoryTableRows(invoicesDb);
@@ -728,10 +737,11 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
 
   } else if (msg.type === 'products_saved' && Array.isArray(msg.products)) {
     let _dpri = [];
-    try { _dpri = JSON.parse(null /* [CLOUD-ONLY] no local deleted_product_ids */) || []; } catch(e){}
+    try { _dpri = JSON.parse(localStorage.getItem("deleted_product_ids")) || []; } catch(e){}
     productsDb = msg.products.filter(p => p && !_dpri.includes(p.id));
-    /* [CLOUD-ONLY] No local storage for products */
-    /* [CLOUD-ONLY] No IndexedDB */if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
+    try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch (e) {}
+    if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllProducts(productsDb);
+    if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
     if (typeof loadProductsDatabaseTable === 'function') loadProductsDatabaseTable();
     if (typeof updateDashboardOverview === 'function') updateDashboardOverview();
     window.lastSyncTimeMs = Date.now();
@@ -739,10 +749,11 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
 
   } else if (msg.type === 'parties_saved' && Array.isArray(msg.parties)) {
     let _dpi = [];
-    try { _dpi = JSON.parse(null /* [CLOUD-ONLY] no local deleted_party_ids */) || []; } catch(e){}
+    try { _dpi = JSON.parse(localStorage.getItem("deleted_party_ids")) || []; } catch(e){}
     partiesDb = msg.parties.filter(p => p && !_dpi.includes(p.id) && !_dpi.includes(p.name));
-    /* [CLOUD-ONLY] No local storage for parties */
-    /* [CLOUD-ONLY] No IndexedDB */if (typeof loadPartiesDatabaseLists === 'function') loadPartiesDatabaseLists();
+    try { localStorage.setItem("parties", JSON.stringify(partiesDb)); } catch (e) {}
+    if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllParties(partiesDb);
+    if (typeof loadPartiesDatabaseLists === 'function') loadPartiesDatabaseLists();
     window.lastSyncTimeMs = Date.now();
     if (typeof window.updateRealtimePresenceHUD === 'function') window.updateRealtimePresenceHUD("live");
 
@@ -754,16 +765,19 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
         const al = String(a).trim().toLowerCase();
         if (!curTombstones.includes(al)) curTombstones.push(al);
       });
-      /* [CLOUD-ONLY] No local storage for deleted_invoice_ids */
+      try { localStorage.setItem("deleted_invoice_ids", JSON.stringify(curTombstones)); } catch(e){}
 
       invoicesDb = window.filterOutDeletedInvoices(invoicesDb);
-      /* [CLOUD-ONLY] No local storage for invoices */
-      /* [CLOUD-ONLY] No IndexedDB */if (msg.invoiceNo && msg.invoiceNo !== msg.id) /* [CLOUD-ONLY] No IndexedDB */
+      try { localStorage.setItem("invoices", JSON.stringify(invoicesDb)); } catch (e) {}
+      if (window.AaryanDB && window.AaryanDB.isReady) {
+        AaryanDB.deleteInvoice(msg.id);
+        if (msg.invoiceNo && msg.invoiceNo !== msg.id) AaryanDB.deleteInvoice(msg.invoiceNo);
       }
       if (Array.isArray(msg.products)) {
         productsDb = msg.products;
-        /* [CLOUD-ONLY] No local storage for products */
-        /* [CLOUD-ONLY] No IndexedDB */if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
+        try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch (e) {}
+        if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllProducts(productsDb);
+        if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
         if (typeof loadProductsDatabaseTable === 'function') loadProductsDatabaseTable();
       }
       if (typeof loadInvoicesHistoryTable === 'function') loadInvoicesHistoryTable();
@@ -772,8 +786,9 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
 
     } else if (msg.recordType === 'product') {
       productsDb = productsDb.filter(p => p && p.id !== msg.id);
-      /* [CLOUD-ONLY] No local storage for products */
-      /* [CLOUD-ONLY] No IndexedDB */if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
+      try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch (e) {}
+      if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllProducts(productsDb);
+      if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
       if (typeof loadProductsDatabaseTable === 'function') loadProductsDatabaseTable();
 
     } else if (msg.recordType === 'party') {
@@ -781,28 +796,29 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
       partiesDb = partiesDb.filter(p => p && p.id !== msg.id && p.name !== msg.id);
       // Also persist tombstone so sync can't resurrect it
       let dpi = [];
-      try { dpi = JSON.parse(null /* [CLOUD-ONLY] no local deleted_party_ids */) || []; } catch(e){}
-      if (!dpi.includes(msg.id)) { dpi.push(msg.id); /* [CLOUD-ONLY] No local storage for deleted_party_ids */ }
-      /* [CLOUD-ONLY] No local storage for parties */
-      /* [CLOUD-ONLY] No IndexedDB */if (typeof loadPartiesDatabaseLists === 'function') loadPartiesDatabaseLists();
+      try { dpi = JSON.parse(localStorage.getItem("deleted_party_ids")) || []; } catch(e){}
+      if (!dpi.includes(msg.id)) { dpi.push(msg.id); localStorage.setItem("deleted_party_ids", JSON.stringify(dpi)); }
+      try { localStorage.setItem("parties", JSON.stringify(partiesDb)); } catch (e) {}
+      if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllParties(partiesDb);
+      if (typeof loadPartiesDatabaseLists === 'function') loadPartiesDatabaseLists();
     }
     window.lastSyncTimeMs = Date.now();
     if (typeof window.updateRealtimePresenceHUD === 'function') window.updateRealtimePresenceHUD("live");
 
   } else if (msg.type === 'DATABASE_MUTATED' || msg.action === 'DATABASE_MUTATED') {
     try {
-      let _dpi = []; try { _dpi = JSON.parse(null /* [CLOUD-ONLY] no local deleted_party_ids */) || []; } catch(e){}
-      let _dpri = []; try { _dpri = JSON.parse(null /* [CLOUD-ONLY] no local deleted_product_ids */) || []; } catch(e){}
+      let _dpi = []; try { _dpi = JSON.parse(localStorage.getItem("deleted_party_ids")) || []; } catch(e){}
+      let _dpri = []; try { _dpri = JSON.parse(localStorage.getItem("deleted_product_ids")) || []; } catch(e){}
 
       if (Array.isArray(msg.products) && msg.products.length > 0)
         productsDb = msg.products.filter(p => p && !_dpri.includes(p.id));
-      else productsDb = [] /* [CLOUD-ONLY] */;
+      else productsDb = JSON.parse(localStorage.getItem("products") || "[]");
 
       if (Array.isArray(msg.parties) && msg.parties.length > 0)
         partiesDb = msg.parties.filter(p => p && !_dpi.includes(p.id) && !_dpi.includes(p.name));
-      else partiesDb = [] /* [CLOUD-ONLY] */;
+      else partiesDb = JSON.parse(localStorage.getItem("parties") || "[]");
 
-      const rawInvs = (Array.isArray(msg.invoices) && msg.invoices.length > 0) ? msg.invoices : [] /* [CLOUD-ONLY] */;
+      const rawInvs = (Array.isArray(msg.invoices) && msg.invoices.length > 0) ? msg.invoices : JSON.parse(localStorage.getItem("invoices") || "[]");
       // ★ Merge: protect recently-saved local invoices from stale peer data
       const _recentMuts = window.recentInvoiceMutations || {};
       const _nowMs = Date.now();
@@ -817,7 +833,7 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
       invoicesDb = window.filterOutDeletedInvoices(rawInvs.concat(_pendingLocal));
 
       if (msg.settings && typeof msg.settings === 'object' && Object.keys(msg.settings).length > 0) globalSettings = msg.settings;
-      else globalSettings = {} /* [CLOUD-ONLY] */;
+      else globalSettings = JSON.parse(localStorage.getItem("settings") || "{}");
 
       if (typeof loadProductsDatabaseTable === 'function') loadProductsDatabaseTable();
       if (typeof loadPartiesDatabaseLists === 'function') loadPartiesDatabaseLists();
@@ -846,19 +862,22 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
       const filteredInvs = window.filterOutDeletedInvoices(msg.invoices);
       if (filteredInvs.length >= invoicesDb.length) {
         invoicesDb = filteredInvs;
-        /* [CLOUD-ONLY] No local storage for invoices */
-        /* [CLOUD-ONLY] No IndexedDB */
+        try { localStorage.setItem("invoices", JSON.stringify(invoicesDb)); } catch (e) {}
+        if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllInvoices(invoicesDb);
+      }
     }
     if (Array.isArray(msg.products) && msg.products.length > 0) {
-      let _dpri2 = []; try { _dpri2 = JSON.parse(null /* [CLOUD-ONLY] no local deleted_product_ids */) || []; } catch(e){}
+      let _dpri2 = []; try { _dpri2 = JSON.parse(localStorage.getItem("deleted_product_ids")) || []; } catch(e){}
       productsDb = msg.products.filter(p => p && !_dpri2.includes(p.id));
-      /* [CLOUD-ONLY] No local storage for products */
-      /* [CLOUD-ONLY] No IndexedDB */
+      try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch (e) {}
+      if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllProducts(productsDb);
+    }
     if (Array.isArray(msg.parties) && msg.parties.length > 0) {
-      let _dpi2 = []; try { _dpi2 = JSON.parse(null /* [CLOUD-ONLY] no local deleted_party_ids */) || []; } catch(e){}
+      let _dpi2 = []; try { _dpi2 = JSON.parse(localStorage.getItem("deleted_party_ids")) || []; } catch(e){}
       partiesDb = msg.parties.filter(p => p && !_dpi2.includes(p.id) && !_dpi2.includes(p.name));
-      /* [CLOUD-ONLY] No local storage for parties */
-      /* [CLOUD-ONLY] No IndexedDB */
+      try { localStorage.setItem("parties", JSON.stringify(partiesDb)); } catch (e) {}
+      if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllParties(partiesDb);
+    }
     if (typeof loadProductsDatabaseTable === 'function') loadProductsDatabaseTable();
     if (typeof loadPartiesDatabaseLists === 'function') loadPartiesDatabaseLists();
     if (typeof loadInvoicesHistoryTable === 'function') loadInvoicesHistoryTable();
@@ -904,7 +923,7 @@ window.addEventListener('storage', (e) => {
       const parsed = JSON.parse(e.newValue);
       if (Array.isArray(parsed)) {
         let deletedPartyIds = [];
-        try { deletedPartyIds = JSON.parse(null /* [CLOUD-ONLY] no local deleted_party_ids */) || []; } catch(e){}
+        try { deletedPartyIds = JSON.parse(localStorage.getItem("deleted_party_ids")) || []; } catch(e){}
         partiesDb = parsed.filter(p => p && !deletedPartyIds.includes(p.id) && !deletedPartyIds.includes(p.name));
         if (typeof loadPartiesDatabaseLists === 'function') loadPartiesDatabaseLists();
         if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
@@ -1499,7 +1518,7 @@ async function uploadInvoicePdfToGoogleDrive(invoiceDetails, pdfBase64) {
         if (idx > -1) {
           invoicesDb[idx].pdfUrl = publicUrl;
           if (invoicesDb[idx].details) invoicesDb[idx].details.pdfUrl = publicUrl;
-          /* [CLOUD-ONLY] No local storage for invoices */
+          try { localStorage.setItem("invoices", JSON.stringify(invoicesDb)); } catch (e) {}
         }
 
         if (typeof showFloatingToast === "function") {
@@ -1516,7 +1535,9 @@ async function uploadInvoicePdfToGoogleDrive(invoiceDetails, pdfBase64) {
 
   // Resilient offline fallback: Queue in AaryanDB outbox for auto-retry
   try {
-    /* [CLOUD-ONLY] No IndexedDB */console.log(`📥 Invoice #${invoiceNo} PDF queued in offline outbox for automatic retry.`);
+    if (window.AaryanDB && typeof window.AaryanDB.enqueueOutbox === "function") {
+      window.AaryanDB.enqueueOutbox("pdf", "upload_pdf", payload);
+      console.log(`📥 Invoice #${invoiceNo} PDF queued in offline outbox for automatic retry.`);
     }
   } catch (queueErr) {
     console.warn("Could not queue PDF in outbox:", queueErr);
@@ -1554,7 +1575,7 @@ window.openDatabaseTelemetryModal = async function() {
   }
 
   if (outboxCountEl) {
-    const count = 0; /* [CLOUD-ONLY] No IndexedDB outbox */
+    const count = await AaryanDB.getOutboxCount();
     outboxCountEl.textContent = `${count} pending operations`;
     outboxCountEl.style.color = count > 0 ? "#f59e0b" : "#10b981";
   }
@@ -1745,7 +1766,7 @@ function initializeApp() {
 
   // Auto-reconciliation: Ensure prod-1 reflects actual remaining stock (0 units after Invoice #0020 of 108 units and #0021 of 19 units)
   try {
-    const rawProds = null /* [CLOUD-ONLY] no local products */;
+    const rawProds = localStorage.getItem("products");
     if (rawProds) {
       const parsedProds = JSON.parse(rawProds);
       if (Array.isArray(parsedProds)) {
@@ -1765,7 +1786,7 @@ function initializeApp() {
           }
         });
         if (changedStock) {
-          /* [CLOUD-ONLY] No local storage for products */
+          localStorage.setItem("products", JSON.stringify(parsedProds));
           if (typeof pushDirectToGoogleDatabase === "function") {
             try { pushDirectToGoogleDatabase("save_products", { products: parsedProds }); } catch(e){}
           }
@@ -1788,7 +1809,11 @@ function initializeApp() {
 
   if (typeof initAudioFeedback === 'function') initAudioFeedback();
   if (typeof initKeyboardShortcuts === 'function') initKeyboardShortcuts();
-  /* [CLOUD-ONLY] No IndexedDB */
+  if (window.AaryanDB && typeof window.AaryanDB.init === 'function') {
+    window.AaryanDB.init().then(() => {
+      // Background IndexedDB cache sync
+    }).catch(e => console.warn("AaryanDB background init:", e));
+  }
 
   setupRouting();
   bindBillingFormInputs();
@@ -1939,7 +1964,7 @@ function initializeApp() {
     printWrapper.style.position = "";
     printWrapper.style.left = "";
 
-    /* [CLOUD-ONLY] No local storage for invoices */
+    localStorage.setItem("invoices", JSON.stringify(invoicesDb));
     if (typeof renderHistoryTableRows === 'function') {
       renderHistoryTableRows(invoicesDb);
     }
@@ -2086,15 +2111,15 @@ if (document.readyState === 'loading') {
 // --- LOCAL STORAGE DATABASES SEEDING (EXCLUSIVELY GOOGLE DATABASE ARCHITECTURE) ---
 function seedDatabasesIfEmpty() {
   try {
-    const storedSettings = {} /* [CLOUD-ONLY] */;
+    const storedSettings = JSON.parse(localStorage.getItem("settings") || "null");
     if (storedSettings && storedSettings.company && (storedSettings.company.name === "ANUDEEP KHADI BANDAR" || !storedSettings.company.name)) {
-      /* [CLOUD-ONLY] no local settings to remove */
+      localStorage.removeItem("settings");
     }
   } catch (err) {
     console.warn("Unable to parse saved settings:", err);
   }
 
-  if (!null /* [CLOUD-ONLY] no local settings */) {
+  if (!localStorage.getItem("settings")) {
     const defaultSettings = {
       company: {
         name: "Aaryan Aqua Needs",
@@ -2126,7 +2151,7 @@ function seedDatabasesIfEmpty() {
         "We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct."
       ]
     };
-    /* [CLOUD-ONLY] No local storage for settings */
+    localStorage.setItem("settings", JSON.stringify(defaultSettings));
   }
 }
 
@@ -2143,7 +2168,7 @@ function loadAllDatabases() {
       botUsername: "fishbilling_bot_bot",
       autoSend: true
     };
-    /* [CLOUD-ONLY] No local storage for settings */
+    try { localStorage.setItem("settings", JSON.stringify(globalSettings)); } catch (e) {}
   } else {
     let tgUpdated = false;
     if (!globalSettings.telegram.token || globalSettings.telegram.token.trim() === "") {
@@ -2161,7 +2186,7 @@ function loadAllDatabases() {
       tgUpdated = true;
     }
     if (tgUpdated) {
-      /* [CLOUD-ONLY] No local storage for settings */
+      try { localStorage.setItem("settings", JSON.stringify(globalSettings)); } catch (e) {}
     }
   }
   if (!globalSettings.security) {
@@ -2220,7 +2245,7 @@ function loadAllDatabases() {
     }
   });
   if (updatedParties) {
-    /* [CLOUD-ONLY] No local storage for parties */
+    localStorage.setItem("parties", JSON.stringify(partiesDb));
   }
 
   // Ensure all products have valid numeric stock if undefined, null, empty or NaN
@@ -2234,7 +2259,7 @@ function loadAllDatabases() {
   });
   if (updatedProductsStock) {
     try {
-      /* [CLOUD-ONLY] No local storage for products */
+      localStorage.setItem("products", JSON.stringify(productsDb));
       if (typeof syncDatabaseToServer === 'function') {
         syncDatabaseToServer("products", productsDb);
       }
@@ -2253,10 +2278,14 @@ function loadAllDatabases() {
     }
   });
   if (updatedInvoices) {
-    /* [CLOUD-ONLY] No local storage for invoices */
+    localStorage.setItem("invoices", JSON.stringify(invoicesDb));
   }
 
-  /* [CLOUD-ONLY] No local storage for settings */
+  try {
+    localStorage.setItem("settings", JSON.stringify(globalSettings));
+  } catch (err) {
+    console.warn("Unable to persist settings:", err);
+  }
 
   activeUsername = globalSettings.security?.username || "Aaryanaqua";
   activePassword = globalSettings.security?.password || globalSettings.security?.pin || "Aaryan@2024";
@@ -2362,13 +2391,13 @@ function reconcileProductInventoryStock(oldInvoice, newInvoice) {
         window.recentProductMutations[prod.description.trim().toLowerCase()] = nowMs;
       }
       try {
-        let storedMut = [] /* [CLOUD-ONLY] */;
+        let storedMut = JSON.parse(localStorage.getItem("recent_product_mutations") || "{}");
         storedMut[prod.id] = nowMs;
         if (prod.description) {
           storedMut[prod.description] = nowMs;
           storedMut[prod.description.trim().toLowerCase()] = nowMs;
         }
-        /* [CLOUD-ONLY] No local storage for recent_product_mutations */
+        localStorage.setItem("recent_product_mutations", JSON.stringify(storedMut));
       } catch(e){}
 
       const actionText = netDelta > 0 
@@ -2383,11 +2412,11 @@ function reconcileProductInventoryStock(oldInvoice, newInvoice) {
   if (modified) {
     try {
       // 1. Immediate LocalStorage persistence (< 0.05ms)
-      /* [CLOUD-ONLY] No local storage for products */
+      localStorage.setItem("products", JSON.stringify(productsDb));
 
       // 2. Immediate IndexedDB persistence
       if (window.AaryanDB && typeof window.AaryanDB.saveAllProducts === "function") {
-        try { /* [CLOUD-ONLY] No IndexedDB */ } catch(e){}
+        try { window.AaryanDB.saveAllProducts(productsDb); } catch(e){}
       }
 
       // 3. Instant local DOM updates (< 0.1ms)
@@ -3912,7 +3941,7 @@ function bindBillingFormInputs() {
     if (!window.recentProductMutations) window.recentProductMutations = {};
     window.recentProductMutations[prod.id] = Date.now();
 
-    /* [CLOUD-ONLY] No local storage for products */
+    localStorage.setItem("products", JSON.stringify(productsDb));
     syncDatabaseToServer("products", productsDb);
     populateBillingSelectors();
 
@@ -5377,7 +5406,7 @@ window.addBillingItemRow = function() {
       };
       productsDb.push(newProd);
       try {
-        /* [CLOUD-ONLY] No local storage for products */
+        localStorage.setItem("products", JSON.stringify(productsDb));
         if (typeof syncDatabaseToServer === 'function') {
           syncDatabaseToServer("products", productsDb);
         }
@@ -5910,8 +5939,10 @@ window.saveCurrentInvoiceRecord = async function(actionType = 'save_only', btnEl
 
     // Persist to localStorage, IndexedDB & broadcast immediately (< 150ms)
     try {
-      /* [CLOUD-ONLY] No local storage for invoices */
-      /* [CLOUD-ONLY] No IndexedDB */
+      localStorage.setItem("invoices", JSON.stringify(invoicesDb));
+      if (window.AaryanDB && typeof window.AaryanDB.saveInvoice === 'function') {
+        window.AaryanDB.saveInvoice(invoiceRecord);
+      }
       broadcastInterTabEvent('INVOICE_TRANSACTION_COMMITTED', {
         invoice: invoiceRecord,
         stockDeltas: stockDeltas,
@@ -6661,7 +6692,7 @@ function formatWhatsAppPhone(phoneStr) {
 
 async function sendTelegramTextMessage(messageText) {
   if (!globalSettings || !globalSettings.telegram) {
-    try { globalSettings = {} /* [CLOUD-ONLY] */; } catch (e) {}
+    try { globalSettings = JSON.parse(localStorage.getItem("settings") || "{}"); } catch (e) {}
   }
   const token = (globalSettings.telegram?.token || "8800483005:AAFVRi7PthDe_Dl1Gk1wLYnvkVP580x2y_g").trim();
   let rawChatId = (globalSettings.telegram?.chatId || "6877857251, 7906132548").trim();
@@ -6669,7 +6700,7 @@ async function sendTelegramTextMessage(messageText) {
   if (!rawChatId.includes("7906132548")) {
     rawChatId = rawChatId ? (rawChatId + ", 7906132548") : "6877857251, 7906132548";
     if (globalSettings.telegram) globalSettings.telegram.chatId = rawChatId;
-    /* [CLOUD-ONLY] No local storage for settings */
+    try { localStorage.setItem("settings", JSON.stringify(globalSettings)); } catch (e) {}
   }
 
   const chatIds = rawChatId.split(/[\s,]+/).map(id => id.trim()).filter(id => id.length > 0);
@@ -6844,7 +6875,7 @@ function showFloatingToast(message, type = "success") {
 
 function savePartiesDb() {
   try {
-    /* [CLOUD-ONLY] No local storage for parties */
+    localStorage.setItem("parties", JSON.stringify(partiesDb));
     if (typeof syncDatabaseToServer === 'function') {
       syncDatabaseToServer("parties", partiesDb);
     }
@@ -7129,7 +7160,7 @@ function getCustomerPhoneNumber(details) {
 // --- WHATSAPP BOT STATE & CONTROLLER ---
 let cachedWaStatus = null;
 try {
-  cachedWaStatus = [] /* [CLOUD-ONLY] */;
+  cachedWaStatus = JSON.parse(localStorage.getItem('wa_bot_status_cache') || 'null');
 } catch (e) {}
 
 // Strict freshness check: A cached status is only considered connected if heartbeat was seen in last 30s
@@ -7151,9 +7182,9 @@ window.isLiveBotConnected = function() {
 
 function saveWaStatusCache(data) {
   if (data && data.status === 'CONNECTED' && data.lastHeartbeat) {
-    /* [CLOUD-ONLY] No local storage for wa_bot_status_cache */
+    try { localStorage.setItem('wa_bot_status_cache', JSON.stringify(data)); } catch (e) {}
   } else if (data && data.status === 'DISCONNECTED') {
-    try { /* [CLOUD-ONLY] no local wa_bot_status_cache to remove */ } catch (e) {}
+    try { localStorage.removeItem('wa_bot_status_cache'); } catch (e) {}
   }
 }
 
@@ -8211,7 +8242,7 @@ window.saveWhatsAppSettings = function() {
   const fallbackToggle = document.getElementById("wa-fallback-1click-toggle");
   if (autoSendToggle) globalSettings.whatsappAutoSend = autoSendToggle.checked;
   if (fallbackToggle) globalSettings.whatsappFallback1Click = fallbackToggle.checked;
-  /* [CLOUD-ONLY] No local storage for settings */
+  localStorage.setItem("settings", JSON.stringify(globalSettings));
 };
 
 // --- FORMAT WHATSAPP INVOICE SUMMARY ---
@@ -8307,7 +8338,7 @@ async function generateInvoicePdfBlob(details) {
         if (idx > -1) {
           invoicesDb[idx].pdfUrl = pUrl;
           if (invoicesDb[idx].details) invoicesDb[idx].details.pdfUrl = pUrl;
-          /* [CLOUD-ONLY] No local storage for invoices */
+          localStorage.setItem("invoices", JSON.stringify(invoicesDb));
         }
       }
     }).catch(e => console.warn("Upload PDF background sync note:", e));
@@ -8896,9 +8927,14 @@ window.markBalanceQrPaidAndSendWhatsApp = function() {
   });
 
   // Persist & Sync to LocalStorage, IndexedDB, Google Sheets & EMQX Mesh
-  /* [CLOUD-ONLY] No local storage for invoices */
+  try {
+    localStorage.setItem("invoices", JSON.stringify(invoicesDb));
+    window.invoicesDb = invoicesDb;
+  } catch (e) {
+    console.warn("Error persisting invoices to localStorage:", e);
+  }
   if (window.AaryanDB && typeof window.AaryanDB.saveInvoice === 'function') {
-    try { /* [CLOUD-ONLY] No IndexedDB */ } catch (e) {}
+    try { window.AaryanDB.saveInvoice(inv); } catch (e) {}
   }
   if (typeof syncDatabaseToServer === 'function') {
     try { syncDatabaseToServer("invoices", inv); } catch (e) {}
@@ -9203,7 +9239,7 @@ function loadInvoicesHistoryTable() {
     return;
   }
 
-  const isHistoryCleared = !!null /* [CLOUD-ONLY] no local database_history_cleared_at */;
+  const isHistoryCleared = !!localStorage.getItem("database_history_cleared_at");
   if (window.isInitialSyncDone || isHistoryCleared) {
     if (elements.historyCount) elements.historyCount.textContent = "0";
     renderHistoryTableRows([]);
@@ -9295,7 +9331,23 @@ function renderHistoryTableRows(records) {
     return;
   }
 
-  records.slice().reverse().forEach(inv => {
+  const sortedRecords = (records || []).slice().sort((a, b) => {
+    function getTs(inv) {
+      if (!inv) return 0;
+      if (typeof inv.id === 'string' && inv.id.startsWith('inv_')) {
+        const ts = parseInt(inv.id.split('_')[1], 10);
+        if (!isNaN(ts) && ts > 1000000000000) return ts;
+      }
+      if (inv.invoiceDate) {
+        const t = new Date(inv.invoiceDate).getTime();
+        if (!isNaN(t) && t > 0) return t;
+      }
+      return 0;
+    }
+    return getTs(b) - getTs(a);
+  });
+
+  sortedRecords.forEach(inv => {
     const details = inv.details || {};
     const isEstimate = Boolean(inv.isEstimate || details.isEstimate || String(inv.invoiceNo || "").startsWith("EST-"));
     const payInfo = getInvoicePaidAndBalance(inv);
@@ -9501,15 +9553,21 @@ window.deleteSavedInvoice = function(identifier) {
       }
     });
 
-    /* [CLOUD-ONLY] No local storage for deleted_invoice_ids */
+    try {
+      localStorage.setItem("deleted_invoice_ids", JSON.stringify(tombstones));
+    } catch (e) {}
 
     // 3. Purge immediately from invoicesDb using the central filter
     invoicesDb = window.filterOutDeletedInvoices(invoicesDb);
-    /* [CLOUD-ONLY] No local storage for invoices */
+    try {
+      localStorage.setItem("invoices", JSON.stringify(invoicesDb));
+    } catch (e) {}
 
     // 4. Purge from IndexedDB
-    /* [CLOUD-ONLY] No IndexedDB */if (invNo && invNo !== invId) /* [CLOUD-ONLY] No IndexedDB */
-      if (cleanId && cleanId !== invNo) /* [CLOUD-ONLY] No IndexedDB */
+    if (window.AaryanDB && typeof window.AaryanDB.deleteInvoice === 'function') {
+      window.AaryanDB.deleteInvoice(invId);
+      if (invNo && invNo !== invId) window.AaryanDB.deleteInvoice(invNo);
+      if (cleanId && cleanId !== invNo) window.AaryanDB.deleteInvoice(cleanId);
     }
 
     // 5. Direct cross-browser & inter-tab broadcast (<30ms)
@@ -9528,7 +9586,9 @@ window.deleteSavedInvoice = function(identifier) {
     });
 
     // Offline outbox queue fallback
-    /* [CLOUD-ONLY] No IndexedDB */AaryanDB.drainOutbox();
+    if (window.AaryanDB && typeof window.AaryanDB.enqueueOutbox === 'function') {
+      AaryanDB.enqueueOutbox("invoice", "delete_record", { type: "invoice", id: invId, invoiceNo: invNo });
+      AaryanDB.drainOutbox();
     }
 
     // 7. DIRECTLY roll back invoice sequence
@@ -9823,8 +9883,10 @@ window.saveProductModal = function(e, andAddAnother = false) {
   window.recentProductMutations[product.id] = Date.now();
   if (product.description) window.recentProductMutations[product.description] = Date.now();
 
-  /* [CLOUD-ONLY] No local storage for products */
-  /* [CLOUD-ONLY] No IndexedDB */renderProductsTable(productsDb);
+  localStorage.setItem("products", JSON.stringify(productsDb));
+  if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllProducts(productsDb);
+  
+  renderProductsTable(productsDb);
   populateBillingSelectors();
   if (typeof updateDashboardOverview === 'function') updateDashboardOverview();
 
@@ -9891,17 +9953,19 @@ window.quickRestockProduct = function(id) {
     window.recentProductMutations[prod.description.trim().toLowerCase()] = nowMs;
   }
   try {
-    let storedMut = [] /* [CLOUD-ONLY] */;
+    let storedMut = JSON.parse(localStorage.getItem("recent_product_mutations") || "{}");
     storedMut[id] = nowMs;
     if (prod.description) {
       storedMut[prod.description] = nowMs;
       storedMut[prod.description.trim().toLowerCase()] = nowMs;
     }
-    /* [CLOUD-ONLY] No local storage for recent_product_mutations */
+    localStorage.setItem("recent_product_mutations", JSON.stringify(storedMut));
   } catch(e){}
 
-  /* [CLOUD-ONLY] No local storage for products */
-  /* [CLOUD-ONLY] No IndexedDB */// 1. Instant local DOM update (< 0.1ms)
+  try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch (e) {}
+  if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllProducts(productsDb);
+
+  // 1. Instant local DOM update (< 0.1ms)
   if (typeof updateProductDomRowFast === 'function') {
     updateProductDomRowFast(prod.id, newStock, prod.status);
   } else if (typeof loadProductsDatabaseTable === 'function') {
@@ -9952,17 +10016,19 @@ window.adjustProductStock = function(id, delta) {
     window.recentProductMutations[prod.description.trim().toLowerCase()] = nowMs;
   }
   try {
-    let storedMut = [] /* [CLOUD-ONLY] */;
+    let storedMut = JSON.parse(localStorage.getItem("recent_product_mutations") || "{}");
     storedMut[id] = nowMs;
     if (prod.description) {
       storedMut[prod.description] = nowMs;
       storedMut[prod.description.trim().toLowerCase()] = nowMs;
     }
-    /* [CLOUD-ONLY] No local storage for recent_product_mutations */
+    localStorage.setItem("recent_product_mutations", JSON.stringify(storedMut));
   } catch(e){}
   
-  /* [CLOUD-ONLY] No local storage for products */
-  /* [CLOUD-ONLY] No IndexedDB */// 1. Instant local DOM update (< 0.1ms)
+  try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch (e) {}
+  if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllProducts(productsDb);
+
+  // 1. Instant local DOM update (< 0.1ms)
   if (typeof updateProductDomRowFast === 'function') {
     updateProductDomRowFast(prod.id, newStock, prod.status);
   } else if (typeof loadProductsDatabaseTable === 'function') {
@@ -10012,17 +10078,19 @@ window.updateProductDiscountInline = function(id, newDiscount) {
     window.recentProductMutations[prod.description.trim().toLowerCase()] = nowMs;
   }
   try {
-    let storedMut = [] /* [CLOUD-ONLY] */;
+    let storedMut = JSON.parse(localStorage.getItem("recent_product_mutations") || "{}");
     storedMut[prod.id] = nowMs;
     if (prod.description) {
       storedMut[prod.description] = nowMs;
       storedMut[prod.description.trim().toLowerCase()] = nowMs;
     }
-    /* [CLOUD-ONLY] No local storage for recent_product_mutations */
+    localStorage.setItem("recent_product_mutations", JSON.stringify(storedMut));
   } catch(e){}
 
-  /* [CLOUD-ONLY] No local storage for products */
-  /* [CLOUD-ONLY] No IndexedDB */// Debounced push to Google Sheets
+  localStorage.setItem("products", JSON.stringify(productsDb));
+  if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllProducts(productsDb);
+
+  // Debounced push to Google Sheets
   if (directPushProductTimer) clearTimeout(directPushProductTimer);
   directPushProductTimer = setTimeout(() => {
     pushDirectToGoogleDatabase("save_products", { products: productsDb });
@@ -10068,17 +10136,19 @@ window.updateProductPriceAfterDiscountInline = function(id, newPrice) {
     window.recentProductMutations[prod.description.trim().toLowerCase()] = nowMs;
   }
   try {
-    let storedMut = [] /* [CLOUD-ONLY] */;
+    let storedMut = JSON.parse(localStorage.getItem("recent_product_mutations") || "{}");
     storedMut[prod.id] = nowMs;
     if (prod.description) {
       storedMut[prod.description] = nowMs;
       storedMut[prod.description.trim().toLowerCase()] = nowMs;
     }
-    /* [CLOUD-ONLY] No local storage for recent_product_mutations */
+    localStorage.setItem("recent_product_mutations", JSON.stringify(storedMut));
   } catch(e){}
 
-  /* [CLOUD-ONLY] No local storage for products */
-  /* [CLOUD-ONLY] No IndexedDB */// Debounced push to Google Sheets
+  localStorage.setItem("products", JSON.stringify(productsDb));
+  if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllProducts(productsDb);
+
+  // Debounced push to Google Sheets
   if (directPushProductTimer) clearTimeout(directPushProductTimer);
   directPushProductTimer = setTimeout(() => {
     pushDirectToGoogleDatabase("save_products", { products: productsDb });
@@ -10365,19 +10435,20 @@ function renderProductsTable(records) {
 window.deleteProductRowDb = function(id) {
   if (confirm("Delete product from inventory list permanently?")) {
     productsDb = productsDb.filter(p => p.id !== id);
-    /* [CLOUD-ONLY] No local storage for products */
+    localStorage.setItem("products", JSON.stringify(productsDb));
     
     let deletedProdIds = [];
     try {
-      deletedProdIds = JSON.parse(null /* [CLOUD-ONLY] no local deleted_product_ids */) || [];
+      deletedProdIds = JSON.parse(localStorage.getItem("deleted_product_ids")) || [];
     } catch (e) { deletedProdIds = []; }
     if (!deletedProdIds.includes(id)) {
       deletedProdIds.push(id);
-      /* [CLOUD-ONLY] No local storage for deleted_product_ids */
+      localStorage.setItem("deleted_product_ids", JSON.stringify(deletedProdIds));
     }
 
     deleteProductFromServer(id);
-    /* [CLOUD-ONLY] No IndexedDB */loadProductsDatabaseTable();
+    if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllProducts(productsDb);
+    loadProductsDatabaseTable();
     if (typeof window.broadcastDatabaseMutation === 'function') window.broadcastDatabaseMutation();
   }
 };
@@ -10941,10 +11012,10 @@ window.importDatabaseBackup = function(e) {
     try {
       const data = JSON.parse(evt.target.result);
       if (data.products && data.parties && data.invoices) {
-        /* [CLOUD-ONLY] No local storage for products */
-        /* [CLOUD-ONLY] No local storage for parties */
-        /* [CLOUD-ONLY] No local storage for invoices */
-        if (data.settings) /* [CLOUD-ONLY] No local storage for settings */
+        localStorage.setItem("products", JSON.stringify(data.products));
+        localStorage.setItem("parties", JSON.stringify(data.parties));
+        localStorage.setItem("invoices", JSON.stringify(data.invoices));
+        if (data.settings) localStorage.setItem("settings", JSON.stringify(data.settings));
 
         loadAllDatabases();
         showFloatingToast("✅ Database successfully restored from JSON backup!", 4000);
@@ -10989,7 +11060,7 @@ function loadSettingsFields() {
 
   if (!globalSettings.telegram) {
     globalSettings.telegram = { token: defToken, chatId: defChats, botUsername: "fishbilling_bot_bot", autoSend: true };
-    /* [CLOUD-ONLY] No local storage for settings */
+    try { localStorage.setItem("settings", JSON.stringify(globalSettings)); } catch (e) {}
   } else {
     let changed = false;
     if (!globalSettings.telegram.token || globalSettings.telegram.token.trim() === "") {
@@ -11007,7 +11078,7 @@ function loadSettingsFields() {
       changed = true;
     }
     if (changed) {
-      /* [CLOUD-ONLY] No local storage for settings */
+      try { localStorage.setItem("settings", JSON.stringify(globalSettings)); } catch (e) {}
     }
   }
 
@@ -11061,7 +11132,7 @@ window.saveTelegramSettings = function(e) {
     botUsername: "fishbilling_bot_bot",
     autoSend: true
   };
-  /* [CLOUD-ONLY] No local storage for settings */
+  try { localStorage.setItem("settings", JSON.stringify(globalSettings)); } catch (err) {}
   syncDatabaseToServer("settings", globalSettings);
   
   if (elements.tgStatusIndicator) {
@@ -11200,7 +11271,7 @@ window.saveTelegramModalSettings = function() {
     notifyChanges: notifyChanges
   };
 
-  /* [CLOUD-ONLY] No local storage for settings */
+  try { localStorage.setItem("settings", JSON.stringify(globalSettings)); } catch (err) {}
   syncDatabaseToServer("settings", globalSettings);
   if (elements.setTgToken) elements.setTgToken.value = globalSettings.telegram.token;
   if (elements.setTgChatId) elements.setTgChatId.value = globalSettings.telegram.chatId;
@@ -11297,7 +11368,7 @@ window.saveSecuritySettings = function(e) {
     whatsappProtectChats: waProtectChats
   };
 
-  /* [CLOUD-ONLY] No local storage for settings */
+  localStorage.setItem("settings", JSON.stringify(globalSettings));
   syncDatabaseToServer("settings", globalSettings);
   showFloatingToast("✅ Login credentials and security settings saved successfully!", 4000);
   loadAllDatabases();
@@ -11329,7 +11400,7 @@ window.saveGlobalSettingsDefaults = function(e) {
   const termsText = elements.setBTerms.value.trim();
   globalSettings.terms = termsText ? termsText.split("\n").map(l => l.trim()).filter(l => l !== "") : [];
 
-  /* [CLOUD-ONLY] No local storage for settings */
+  localStorage.setItem("settings", JSON.stringify(globalSettings));
   syncDatabaseToServer("settings", globalSettings);
   showFloatingToast("✅ Store configuration defaults saved successfully!", 4000);
   loadAllDatabases();
@@ -11546,7 +11617,7 @@ async function uploadInvoicePdfToTelegram(invoiceDetails, silent = false, precom
   if (!chat.includes("7906132548")) {
     chat = chat ? (chat + ", 7906132548") : "6877857251, 7906132548";
     if (globalSettings.telegram) globalSettings.telegram.chatId = chat;
-    /* [CLOUD-ONLY] No local storage for settings */
+    try { localStorage.setItem("settings", JSON.stringify(globalSettings)); } catch (e) {}
   }
 
   if (!silent) {
@@ -11581,7 +11652,7 @@ async function uploadInvoicePdfToTelegram(invoiceDetails, silent = false, precom
         if (idx > -1) {
           invoicesDb[idx].pdfUrl = pUrl;
           if (invoicesDb[idx].details) invoicesDb[idx].details.pdfUrl = pUrl;
-          /* [CLOUD-ONLY] No local storage for invoices */
+          localStorage.setItem("invoices", JSON.stringify(invoicesDb));
         }
       }
     }).catch(e => console.warn("Background Drive upload note:", e));
@@ -11709,16 +11780,16 @@ window.resetBillingDatabaseTo0001 = async function() {
     }
     
     // Persist tombstones and record the exact clear timestamp
-    /* [CLOUD-ONLY] No local storage for deleted_invoice_ids */
+    localStorage.setItem("deleted_invoice_ids", JSON.stringify(tombstones));
     const clearTimestamp = Date.now();
-    /* [CLOUD-ONLY] No local storage for database_history_cleared_at */
+    localStorage.setItem("database_history_cleared_at", String(clearTimestamp));
     window.databaseHistoryClearedAt = clearTimestamp;
 
     // 2. Clear local memory, storage, and IndexedDB
     invoicesDb = [];
-    /* [CLOUD-ONLY] No local storage for invoices */
+    localStorage.setItem("invoices", JSON.stringify([]));
     if (window.AaryanDB && typeof window.AaryanDB.saveAllInvoices === 'function') {
-      try { /* [CLOUD-ONLY] No IndexedDB */ } catch (e) {}
+      try { window.AaryanDB.saveAllInvoices([]); } catch (e) {}
     }
     window.isInitialSyncDone = true;
 
@@ -11791,11 +11862,11 @@ window.importDataBackupJSON = function(event) {
         const importedParties = data.parties || [];
         const importedSettings = data.settings || null;
 
-        /* [CLOUD-ONLY] No local storage for invoices */
-        /* [CLOUD-ONLY] No local storage for products */
-        /* [CLOUD-ONLY] No local storage for parties */
+        localStorage.setItem("invoices", JSON.stringify(importedInvoices));
+        localStorage.setItem("products", JSON.stringify(importedProducts));
+        localStorage.setItem("parties", JSON.stringify(importedParties));
         if (importedSettings) {
-          /* [CLOUD-ONLY] No local storage for settings */
+          localStorage.setItem("settings", JSON.stringify(importedSettings));
         }
 
         if (typeof syncDatabaseToServer === 'function') {
@@ -12217,11 +12288,11 @@ function hydrateSyncedDatabase(data) {
     const parties = Array.isArray(data.parties) ? data.parties : [];
     const settings = (data.settings && typeof data.settings === "object") ? data.settings : null;
 
-    /* [CLOUD-ONLY] No local storage for invoices */
-    /* [CLOUD-ONLY] No local storage for products */
-    /* [CLOUD-ONLY] No local storage for parties */
+    localStorage.setItem("invoices", JSON.stringify(invoices));
+    localStorage.setItem("products", JSON.stringify(products));
+    localStorage.setItem("parties", JSON.stringify(parties));
     if (settings) {
-      /* [CLOUD-ONLY] No local storage for settings */
+      localStorage.setItem("settings", JSON.stringify(settings));
       globalSettings = settings;
     }
 
@@ -13653,7 +13724,7 @@ window.openInvoiceVerificationModal = function(invoiceNo, rawUrl = "") {
   };
 
   // 1. Check Cancelled Registry
-  const cancelledInvoices = [] /* [CLOUD-ONLY] */;
+  const cancelledInvoices = JSON.parse(localStorage.getItem("cancelled_invoices") || "[]");
   let cancMatch = null;
   if (qId) {
     cancMatch = cancelledInvoices.find(c => c && String(c.id).trim().toLowerCase() === qId.toLowerCase());
@@ -14037,9 +14108,14 @@ window.submitInvoicePaymentSettlement = function() {
   });
 
   // Save to database & sync
-  /* [CLOUD-ONLY] No local storage for invoices */
+  try {
+    localStorage.setItem("invoices", JSON.stringify(invoicesDb));
+    window.invoicesDb = invoicesDb;
+  } catch (e) {
+    console.warn("Error persisting invoices to localStorage:", e);
+  }
   if (window.AaryanDB && typeof window.AaryanDB.saveInvoice === 'function') {
-    try { /* [CLOUD-ONLY] No IndexedDB */ } catch (e) {}
+    try { window.AaryanDB.saveInvoice(inv); } catch (e) {}
   }
   if (typeof syncDatabaseToServer === 'function') {
     try { syncDatabaseToServer("invoices", inv); } catch (e) {}
