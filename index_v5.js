@@ -2689,8 +2689,9 @@ function loadAllDatabases() {
   window.productsDb = productsDb;
   window.partiesDb = partiesDb;
 
-  // Seed default product catalog if empty so billing is never blocked
-  if (!productsDb || productsDb.length === 0) {
+  // Seed default product catalog ONLY on very first install if never seeded
+  if (!localStorage.getItem("products_seeded") && localStorage.getItem("products") === null && (!productsDb || productsDb.length === 0)) {
+    localStorage.setItem("products_seeded", "true");
     productsDb = [
       {
         id: "prod-1",
@@ -2733,8 +2734,9 @@ function loadAllDatabases() {
     try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch (e) {}
   }
 
-  // Seed default party accounts if empty
-  if (!partiesDb || partiesDb.length === 0) {
+  // Seed default party accounts ONLY on very first install if never seeded
+  if (!localStorage.getItem("parties_seeded") && localStorage.getItem("parties") === null && (!partiesDb || partiesDb.length === 0)) {
+    localStorage.setItem("parties_seeded", "true");
     partiesDb = [
       {
         id: "party-1",
@@ -11175,11 +11177,8 @@ function renderPartiesLists(records) {
   const receivers = records.filter(p => p.type === 'receiver');
   const consignees = records.filter(p => p.type === 'consignee');
 
-  const isPartiesSyncing = !window.isInitialSyncDone;
   if (receivers.length === 0) {
-    elements.receiversScrollBox.innerHTML = isPartiesSyncing
-      ? `<div class="text-center text-muted padding-20"><i class="fa-solid fa-spinner fa-spin"></i> Syncing clients...</div>`
-      : `<div class="text-center text-muted padding-20">No receivers found.</div>`;
+    elements.receiversScrollBox.innerHTML = `<div class="text-center text-muted padding-20">No receivers found.</div>`;
   } else {
     receivers.forEach(p => {
       const card = createPartyListCard(p);
@@ -11188,9 +11187,7 @@ function renderPartiesLists(records) {
   }
 
   if (consignees.length === 0) {
-    elements.consigneesScrollBox.innerHTML = isPartiesSyncing
-      ? `<div class="text-center text-muted padding-20"><i class="fa-solid fa-spinner fa-spin"></i> Syncing consignees...</div>`
-      : `<div class="text-center text-muted padding-20">No consignees found.</div>`;
+    elements.consigneesScrollBox.innerHTML = `<div class="text-center text-muted padding-20">No consignees found.</div>`;
   } else {
     consignees.forEach(p => {
       const card = createPartyListCard(p);
@@ -11317,19 +11314,24 @@ function createPartyListCard(p) {
 
 window.deletePartyRowDb = function(id) {
   if (confirm("Delete this customer party profile permanently?")) {
-    partiesDb = partiesDb.filter(p => (p.id !== id) && (p.name !== id));
+    const targetId = String(id || "").trim();
+    localStorage.setItem("parties_seeded", "true");
+    partiesDb = partiesDb.filter(p => p && String(p.id || "").trim() !== targetId && String(p.name || "").trim() !== targetId);
     localStorage.setItem("parties", JSON.stringify(partiesDb));
     
     let deletedPartyIds = [];
     try {
       deletedPartyIds = JSON.parse(localStorage.getItem("deleted_party_ids")) || [];
     } catch (e) { deletedPartyIds = []; }
-    if (!deletedPartyIds.includes(id)) {
-      deletedPartyIds.push(id);
+    if (targetId && !deletedPartyIds.includes(targetId)) {
+      deletedPartyIds.push(targetId);
       localStorage.setItem("deleted_party_ids", JSON.stringify(deletedPartyIds));
     }
 
-    deletePartyFromServer(id);
+    deletePartyFromServer(targetId);
+    if (typeof pushDirectToGoogleDatabase === "function") {
+      try { pushDirectToGoogleDatabase("save_parties", { parties: partiesDb }); } catch(e){}
+    }
     if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllParties(partiesDb);
     loadPartiesDatabaseLists();
     populateBillingSelectors();

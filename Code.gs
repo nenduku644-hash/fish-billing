@@ -1063,7 +1063,7 @@ function processDeleteRecord(type, id, user, ss) {
 
     } else if (type === "party" || type === "customer") {
       var customers = readCustomersFromSheet(ss);
-      var filteredC = customers.filter(function(c) { return c.id !== id; });
+      var filteredC = customers.filter(function(c) { return c && c.id !== id && c.name !== id; });
       writeCustomersToSheet(filteredC, ss);
       try { CacheService.getScriptCache().remove("cache_sync_bundle"); } catch (e) {}
       appendAuditLog("DELETE_CUSTOMER", user || "Admin", id, "SUCCESS", "Customer removed from parties database", ss);
