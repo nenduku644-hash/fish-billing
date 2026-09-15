@@ -1550,7 +1550,7 @@ window.AaryanDB = AaryanDB;
 let directPushProductTimer = null;
 let directPushPartiesTimer = null;
 
-async function pushDirectToGoogleDatabase(action, payload) {
+async function pushDirectToGoogleDatabase(action, payload, maxRetries = 2) {
   if (typeof window.updateCloudSyncBadge === "function") {
     window.updateCloudSyncBadge("syncing");
   }
@@ -1561,28 +1561,35 @@ async function pushDirectToGoogleDatabase(action, payload) {
     ...payload
   };
 
-  try {
-    const res = await fetch(GOOGLE_SCRIPT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(gasPayload),
-      redirect: "follow"
-    });
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(GOOGLE_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(gasPayload),
+        redirect: "follow"
+      });
 
-    if (res.ok) {
-      const text = await res.text();
-      let data = null;
-      try { data = JSON.parse(text); } catch (pe) {}
-      if (data && (data.ok || data.success)) {
-        window.lastSyncTimeMs = Date.now();
-        if (typeof window.updateCloudSyncBadge === "function") {
-          window.updateCloudSyncBadge("synced");
+      if (res.ok) {
+        const text = await res.text();
+        let data = null;
+        try { data = JSON.parse(text); } catch (pe) {}
+        if (data && (data.ok || data.success)) {
+          window.lastSyncTimeMs = Date.now();
+          if (typeof window.updateCloudSyncBadge === "function") {
+            window.updateCloudSyncBadge("synced");
+          }
+          return data;
         }
-        return data;
       }
+    } catch (err) {
+      // Network hiccup or concurrency timeout
     }
-  } catch (err) {
-    console.warn("Direct push to Google Database note (queued to outbox):", err.message);
+
+    if (attempt < maxRetries) {
+      const backoffMs = Math.pow(2, attempt) * 800 + Math.floor(Math.random() * 500);
+      await new Promise(r => setTimeout(r, backoffMs));
+    }
   }
 
   // Fallback / Offline resilience: enqueue in AaryanDB outbox
@@ -2470,12 +2477,14 @@ function initializeApp() {
   // ============================================================================
   let multiUserSyncTimer = null;
   let lastCloudSyncPoll = 0;
+  let nextStaggeredPollInterval = 45000 + Math.floor(Math.random() * 30000);
 
   async function performCloudHeartbeat(force = false) {
     const now = Date.now();
-    // Poll Google Apps Script every 15s to respect quotas and prevent HTTP 429 limits
-    if (force || (now - lastCloudSyncPoll >= 15000)) {
+    // Staggered adaptive polling (45s - 75s random jitter) protects Google Apps Script from 50 concurrent users
+    if (force || (now - lastCloudSyncPoll >= nextStaggeredPollInterval)) {
       lastCloudSyncPoll = now;
+      nextStaggeredPollInterval = 45000 + Math.floor(Math.random() * 30000);
       try {
         if (navigator.onLine && typeof window.triggerDatabaseSync === "function" && !isSyncing) {
           await window.triggerDatabaseSync(false);
@@ -6435,10 +6444,14 @@ window.saveCurrentInvoiceRecord = async function(actionType = 'save_only', btnEl
       currentInvoice.balanceDue = Math.max(0, InvoiceUtils.roundToTwo(grandTotal - (pAmt + bPaid)));
     }
 
-    // Auto-resolve invoice number collision on new invoices
-    if (!currentInvoice.isEditing && invoicesDb.some(inv => inv && inv.invoiceNo === currentInvoice.invoiceNo)) {
+    // Auto-resolve invoice number collision on new invoices with friendly multi-user notice
+    if (!currentInvoice.isEditing && invoicesDb.some(inv => inv && (inv.invoiceNo === currentInvoice.invoiceNo || (inv.details && inv.details.invoiceNo === currentInvoice.invoiceNo)))) {
+      const priorNo = currentInvoice.invoiceNo;
       currentInvoice.invoiceNo = InvoiceUtils.getNextInvoiceNumber(invoicesDb);
       if (elements.billInvoiceNo) elements.billInvoiceNo.value = currentInvoice.invoiceNo;
+      if (typeof showFloatingToast === "function") {
+        showFloatingToast(`ℹ️ Invoice ${priorNo} was committed by another staff member. Auto-sequenced to ${currentInvoice.invoiceNo}.`, "info", 4500);
+      }
     }
 
     const uniqueId = currentInvoice.id || "inv_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
@@ -9973,8 +9986,12 @@ function renderHistoryTableRows(records) {
   });
 }
 
+let searchHistoryDebounce = null;
 elements.searchHistoryInput.addEventListener("input", () => {
-  window.filterInvoicesByStatus();
+  if (searchHistoryDebounce) clearTimeout(searchHistoryDebounce);
+  searchHistoryDebounce = setTimeout(() => {
+    window.filterInvoicesByStatus();
+  }, 100);
 });
 
 window.editSavedInvoice = function(id) {
@@ -11036,8 +11053,12 @@ window.filterProductsByStockStatus = function() {
   renderProductsTable(filtered);
 };
 
+let searchProductsDebounce = null;
 elements.searchProductsInput.addEventListener("input", () => {
-  filterProductsByStockStatus();
+  if (searchProductsDebounce) clearTimeout(searchProductsDebounce);
+  searchProductsDebounce = setTimeout(() => {
+    filterProductsByStockStatus();
+  }, 100);
 });
 
 // --- PARTIES DIALOG MODALS & CARDS ---
