@@ -1201,7 +1201,8 @@ async function pushDirectToGoogleDatabase(action, payload, maxRetries = 2) {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify(gasPayload),
-        redirect: "follow"
+        redirect: "follow",
+        keepalive: true
       });
 
       if (res.ok) {
@@ -1355,7 +1356,8 @@ window.triggerDatabaseSync = async function(forceReload = false) {
   activeSyncPromise = fetch(gasSyncUrl, {
     signal: controller.signal,
     redirect: 'follow',
-    cache: 'no-store'
+    cache: 'no-store',
+    keepalive: true
   })
   .then(async (res) => {
     clearTimeout(timeoutId);
@@ -1369,8 +1371,7 @@ window.triggerDatabaseSync = async function(forceReload = false) {
   })
   .then((data) => {
     if (!data) return;
-    lastSyncTimeMs = Date.now();
-    window.lastSyncTimeMs = lastSyncTimeMs;
+
     if (typeof window.updateCloudSyncBadge === 'function') {
       window.updateCloudSyncBadge("synced");
     }
@@ -1424,29 +1425,22 @@ window.triggerDatabaseSync = async function(forceReload = false) {
     // 4. Authoritative Settings directly from Google Database Master
     const rawSettings = data.settings || data.globalSettings;
     if (rawSettings && typeof rawSettings === 'object' && Object.keys(rawSettings).length > 0) {
-      globalSettings = Object.assign({}, globalSettings, rawSettings);
+      globalSettings = rawSettings;
       window.globalSettings = globalSettings;
       changed = true;
     }
 
-    const isFirstHydration = !window.isInitialSyncDone;
-    window.isInitialSyncDone = true;
-
-    // Only re-render DOM tables and summaries if database values actually changed!
-    if (changed || isFirstHydration) {
+    if (changed) {
+      if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
       if (typeof loadProductsDatabaseTable === 'function') loadProductsDatabaseTable();
       if (typeof loadPartiesDatabaseLists === 'function') loadPartiesDatabaseLists();
       if (typeof loadInvoicesHistoryTable === 'function') loadInvoicesHistoryTable();
       if (typeof updateDashboardOverview === 'function') updateDashboardOverview();
       if (typeof calculateSummaryAndTable === 'function') calculateSummaryAndTable();
       if (typeof autoSuggestInvoiceNo === 'function') autoSuggestInvoiceNo();
-      if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
-
-      if (changed && typeof window.broadcastDatabaseMutation === 'function') {
-        window.broadcastDatabaseMutation();
-      }
     }
 
+    window.lastSyncTimeMs = Date.now();
     if (typeof window.updateRealtimePresenceHUD === 'function') {
       window.updateRealtimePresenceHUD("live");
     }
@@ -1477,6 +1471,15 @@ window.triggerDatabaseSync = async function(forceReload = false) {
 try {
   window.triggerDatabaseSync();
 } catch (e) {}
+
+// High-Speed Pre-Warming Engine: Pings Google Apps Script every 3.5 minutes to eliminate cold-start lag
+(function startCloudDatabasePrewarming() {
+  setInterval(() => {
+    if (navigator.onLine) {
+      fetch(`${GOOGLE_SCRIPT_URL}?action=ping`, { mode: 'no-cors', cache: 'no-store' }).catch(() => {});
+    }
+  }, 210000); // 3.5 minutes
+})();
 
 // --- SECURE GOOGLE DRIVE PDF ARCHIVE & CLOUD SYNC ENGINE ---
 async function uploadInvoicePdfToGoogleDrive(invoiceDetails, pdfBase64) {

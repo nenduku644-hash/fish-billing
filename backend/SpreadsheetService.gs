@@ -13,8 +13,9 @@ function getMasterSpreadsheetId() {
 var SPREADSHEET_NAME = "Aaryan_Aqua_Live_Master_Sheet";
 
 function getMasterSpreadsheet() {
+  var props = PropertiesService.getScriptProperties();
   var ss = null;
-  var sheetId = getMasterSpreadsheetId();
+  var sheetId = props.getProperty("MASTER_SPREADSHEET_ID");
   if (sheetId) {
     try {
       ss = SpreadsheetApp.openById(sheetId);
@@ -35,11 +36,16 @@ function getMasterSpreadsheet() {
       DriveApp.getRootFolder().removeFile(ssFile);
     }
     try {
-      PropertiesService.getScriptProperties().setProperty("MASTER_SPREADSHEET_ID", ss.getId());
+      props.setProperty("MASTER_SPREADSHEET_ID", ss.getId());
     } catch (pe) {}
   }
 
-  setupSpreadsheetTabs(ss);
+  // Fast-path: only run tab setup once per lifecycle, skipping 10+ RPC calls on every request
+  var isSetup = props.getProperty("TABS_SETUP_DONE");
+  if (!isSetup) {
+    setupSpreadsheetTabs(ss);
+    try { props.setProperty("TABS_SETUP_DONE", "true"); } catch (e) {}
+  }
   return ss;
 }
 
@@ -104,15 +110,14 @@ function ensureSheetWithHeaders(ss, sheetName, headers, headerColor) {
 function readInvoicesFromSheet(ss) {
   if (!ss) ss = getMasterSpreadsheet();
   var sheet = ss.getSheetByName("Invoices");
-  if (!sheet || sheet.getLastRow() < 2) return [];
+  if (!sheet) return [];
 
-  var lastRow = sheet.getLastRow();
-  var numCols = Math.min(sheet.getLastColumn(), 15);
-  var values = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
+  var data = sheet.getDataRange().getValues();
+  if (!data || data.length < 2) return [];
+
   var invoices = [];
-
-  for (var i = 0; i < values.length; i++) {
-    var row = values[i];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
     var invNo = String(row[0] || "").trim();
     if (!invNo) continue;
 
@@ -200,10 +205,6 @@ function writeInvoiceToSheet(inv, ss) {
     sheet.getRange(targetRow, 1, 1, rowData.length).setValues([rowData]);
   } else {
     sheet.appendRow(rowData);
-    var newRow = sheet.getLastRow();
-    sheet.getRange(newRow, 5).setNumberFormat("₹#,##0.00");
-    sheet.getRange(newRow, 8).setNumberFormat("₹#,##0.00");
-    sheet.getRange(newRow, 9).setNumberFormat("₹#,##0.00");
   }
 }
 
@@ -231,19 +232,19 @@ function deleteInvoiceFromSheet(delId, ss) {
 function readInventoryFromSheet(ss) {
   if (!ss) ss = getMasterSpreadsheet();
   var sheet = ss.getSheetByName("Inventory");
-  if (!sheet || sheet.getLastRow() < 2) return [];
+  if (!sheet) return [];
 
-  var lastRow = sheet.getLastRow();
-  var values = sheet.getRange(2, 1, lastRow - 1, 11).getValues();
+  var data = sheet.getDataRange().getValues();
+  if (!data || data.length < 2) return [];
+
   var products = [];
-
-  for (var i = 0; i < values.length; i++) {
-    var row = values[i];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
     var id = String(row[0] || "").trim();
     if (!id && !row[1]) continue;
 
     products.push({
-      id: id || ("prod_" + (i + 1)),
+      id: id || ("prod_" + i),
       description: String(row[1] || ""),
       hsn: String(row[2] || ""),
       packSize: String(row[3] || ""),
@@ -307,19 +308,19 @@ function writeInventoryToSheet(products, ss) {
 function readCustomersFromSheet(ss) {
   if (!ss) ss = getMasterSpreadsheet();
   var sheet = ss.getSheetByName("Customers");
-  if (!sheet || sheet.getLastRow() < 2) return [];
+  if (!sheet) return [];
 
-  var lastRow = sheet.getLastRow();
-  var values = sheet.getRange(2, 1, lastRow - 1, 8).getValues();
+  var data = sheet.getDataRange().getValues();
+  if (!data || data.length < 2) return [];
+
   var parties = [];
-
-  for (var i = 0; i < values.length; i++) {
-    var row = values[i];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
     var id = String(row[0] || "").trim();
     if (!id && !row[1]) continue;
 
     parties.push({
-      id: id || ("party_" + (i + 1)),
+      id: id || ("party_" + i),
       name: String(row[1] || ""),
       type: String(row[2] || "buyer"),
       gstin: String(row[3] || ""),
