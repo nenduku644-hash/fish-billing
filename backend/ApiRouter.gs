@@ -37,27 +37,14 @@ function handleApiGet(e) {
     })).setMimeType(ContentService.MimeType.JSON);
   }
 
-  // 2. Authoritative Sync / Pull from Google Sheets
+  // 2. Authoritative Sync / Pull — ALWAYS fresh from Google Sheets (NO cache)
   if (action === "sync" || action === "pull") {
     var auth = authenticateRequest(e, null);
     if (!auth.ok) {
       return ContentService.createTextOutput(JSON.stringify(auth)).setMimeType(ContentService.MimeType.JSON);
     }
 
-    // High-speed RAM cache check
-    var cache = CacheService.getScriptCache();
-    var cachedBundle = null;
-    try {
-      var bundleStr = cache.get("cache_sync_bundle");
-      if (bundleStr) cachedBundle = JSON.parse(bundleStr);
-    } catch (err) {}
-
-    if (cachedBundle) {
-      cachedBundle.serverTime = Date.now();
-      return ContentService.createTextOutput(JSON.stringify(cachedBundle)).setMimeType(ContentService.MimeType.JSON);
-    }
-
-    // Read Authoritative Data directly from Google Sheets
+    // Read Authoritative Data DIRECTLY from Google Sheets — no cache
     var ssMaster = getMasterSpreadsheet();
     var invs = readInvoicesFromSheet(ssMaster);
     var prods = readInventoryFromSheet(ssMaster);
@@ -73,13 +60,6 @@ function handleApiGet(e) {
       serverTime: Date.now(),
       timestamp: new Date().toISOString()
     };
-
-    try {
-      var bundleJson = JSON.stringify(fullBundle);
-      if (bundleJson.length < 95000) {
-        cache.put("cache_sync_bundle", bundleJson, 21600);
-      }
-    } catch (cacheErr) {}
 
     return ContentService.createTextOutput(JSON.stringify(fullBundle)).setMimeType(ContentService.MimeType.JSON);
   }
@@ -149,7 +129,7 @@ function handleApiPost(e) {
         return ContentService.createTextOutput(JSON.stringify({ ok: false, error: "Products must be an array" })).setMimeType(ContentService.MimeType.JSON);
       }
       writeInventoryToSheet(prodList, ss);
-      try { CacheService.getScriptCache().remove("cache_sync_bundle"); } catch (ce) {}
+      /* [CLOUD-ONLY] No server-side cache to invalidate */
       appendAuditLog("SAVE_PRODUCTS", user, "—", "SUCCESS", "Saved " + prodList.length + " products", ss);
       return ContentService.createTextOutput(JSON.stringify({ ok: true, count: prodList.length })).setMimeType(ContentService.MimeType.JSON);
     }
@@ -160,7 +140,7 @@ function handleApiPost(e) {
         return ContentService.createTextOutput(JSON.stringify({ ok: false, error: "Parties must be an array" })).setMimeType(ContentService.MimeType.JSON);
       }
       writeCustomersToSheet(partyList, ss);
-      try { CacheService.getScriptCache().remove("cache_sync_bundle"); } catch (ce) {}
+      /* [CLOUD-ONLY] No server-side cache to invalidate */
       appendAuditLog("SAVE_PARTIES", user, "—", "SUCCESS", "Saved " + partyList.length + " customers", ss);
       return ContentService.createTextOutput(JSON.stringify({ ok: true, count: partyList.length })).setMimeType(ContentService.MimeType.JSON);
     }
