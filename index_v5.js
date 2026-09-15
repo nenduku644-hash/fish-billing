@@ -8,66 +8,73 @@ window.isInitialSyncDone = false;
 let dbEventSource = null;
 let isSavingInvoice = false;
 
-// Authoritative Master Fallback Snapshot (Ensures 0ms instant display even on cold cache)
-window.recentProductMutations = {};
-const GOOGLE_MASTER_PRODUCTS_SNAPSHOT = [
-  {
-    id: "prod-1",
-    description: "RALLIMIN ADV + 15 KGs",
-    hsn: "23099090",
-    packSize: "15 KG",
-    unit: "Bucket",
-    rate: 3600,
-    discount: 45,
-    price: 1980,
-    stock: 0,
-    totalValue: 0,
-    status: "Out of Stock"
-  },
-  {
-    id: "prod-2",
-    description: "AQUA PROBIOTIC FEED SUPPLEMENT 1KG",
-    hsn: "23099090",
-    packSize: "1 KG",
-    unit: "Can",
-    rate: 850,
-    discount: 10,
-    price: 765,
-    stock: 100,
-    totalValue: 76500,
-    status: "In Stock"
-  },
-  {
-    id: "prod-3",
-    description: "ZEOLITE POWDER 25KG BAG",
-    hsn: "28421000",
-    packSize: "25 KG",
-    unit: "Bag",
-    rate: 450,
-    discount: 5,
-    price: 427.5,
-    stock: 100,
-    totalValue: 42750,
-    status: "In Stock"
-  }
-];
+// Pure Google Database Master: Zero Local Storage / Zero Device Cache
+const ALLOWED_UI_SESSION_KEYS = new Set([
+  "app_locked",
+  "app_authenticated",
+  "last_active_time",
+  "billing_audio_fx_enabled",
+  "aaryan_dashboard_view_mode"
+]);
 
-try {
-  const localProds = JSON.parse(localStorage.getItem("products") || "[]");
-  productsDb = (Array.isArray(localProds) && localProds.length > 0) ? localProds : GOOGLE_MASTER_PRODUCTS_SNAPSHOT;
-  partiesDb = JSON.parse(localStorage.getItem("parties") || "[]");
-  invoicesDb = JSON.parse(localStorage.getItem("invoices") || "[]");
-  globalSettings = JSON.parse(localStorage.getItem("settings") || "{}");
-  if (Array.isArray(invoicesDb) && invoicesDb.length > 0) {
-    invoicesDb.sort((a, b) => String(a.invoiceNo || "").localeCompare(String(b.invoiceNo || "")));
-    invoicesDb.forEach(inv => {
-      if (inv && !inv.qrToken) {
-        const sfx = (inv.id || '').replace(/[^a-zA-Z0-9]/g, '').slice(-4).toUpperCase() || Math.random().toString(36).substring(2, 6).toUpperCase();
-        inv.qrToken = `Q-${String(inv.invoiceNo || '').replace(/^#/, '')}-${sfx}`;
-        if (inv.details) inv.details.qrToken = inv.qrToken;
+(function purgeAndLockLocalCache() {
+  try {
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && !ALLOWED_UI_SESSION_KEYS.has(k)) {
+        keysToRemove.push(k);
       }
+    }
+    keysToRemove.forEach(k => {
+      try { Storage.prototype.removeItem.call(localStorage, k); } catch(e){}
     });
+  } catch(e){}
+
+  try {
+    sessionStorage.clear();
+  } catch(e){}
+
+  if (typeof indexedDB !== 'undefined') {
+    try {
+      if (typeof indexedDB.databases === 'function') {
+        indexedDB.databases().then(dbs => {
+          (dbs || []).forEach(db => {
+            if (db && db.name) {
+              try { indexedDB.deleteDatabase(db.name); } catch(e){}
+            }
+          });
+        }).catch(() => {});
+      }
+      ['aaryan_aqua_offline_v3', 'aaryan_aqua_offline_v2', 'aaryan_aqua_offline_v1', 'aaryan_aqua_db'].forEach(dbName => {
+        try { indexedDB.deleteDatabase(dbName); } catch(e){}
+      });
+    } catch(e){}
   }
+
+  // Intercept setItem and getItem to guarantee NO local database caching ever occurs
+  const realSetItem = Storage.prototype.setItem;
+  const realGetItem = Storage.prototype.getItem;
+
+  localStorage.setItem = function(key, val) {
+    if (!ALLOWED_UI_SESSION_KEYS.has(key)) {
+      return; // Silently drop: zero local database records stored on device
+    }
+    return realSetItem.call(localStorage, key, val);
+  };
+
+  localStorage.getItem = function(key) {
+    if (!ALLOWED_UI_SESSION_KEYS.has(key)) {
+      return null; // Guarantee zero local cache is ever returned for database entities
+    }
+    return realGetItem.call(localStorage, key);
+  };
+})();
+
+productsDb = [];
+partiesDb = [];
+invoicesDb = [];
+globalSettings = {};
 
   // Persistent Cancelled / Voided Invoices Registry
   window.archiveCancelledInvoice = function(invoiceRecord, reason = "Cancelled") {
@@ -306,7 +313,6 @@ try {
 
   invoicesDb = window.filterOutDeletedInvoices(invoicesDb);
   try { localStorage.setItem("invoices", JSON.stringify(invoicesDb)); } catch (e) {}
-} catch (e) {}
 // XSS Defense Helper
 function escapeHtml(str) {
   if (str === null || str === undefined) return '';
@@ -1126,446 +1132,36 @@ window.broadcastDatabaseMutation = function(extra = {}) {
 };
 
 
-// --- AARYAN-DB: ASYNCHRONOUS INDEXED-DB ENGINE + WRITE-AHEAD OUTBOX QUEUE ---
+// --- AARYAN-DB: PURE IN-MEMORY ADAPTER (ZERO DEVICE STORAGE / ZERO LOCAL CACHE) ---
 const AaryanDB = {
-  dbName: 'aaryan_aqua_db_v2',
-  dbVersion: 1,
   db: null,
-  isReady: false,
-  outboxTimer: null,
-  isDrainingOutbox: false,
-
+  isReady: true,
   async init() {
-    return new Promise((resolve) => {
-      if (!window.indexedDB) {
-        console.warn("IndexedDB not available, falling back to localStorage.");
-        this.isReady = true;
-        this.startOutboxWorker();
-        return resolve();
-      }
-
-      try {
-        const req = indexedDB.open(this.dbName, this.dbVersion);
-        req.onupgradeneeded = (e) => {
-          const d = e.target.result;
-          if (!d.objectStoreNames.contains('invoices')) {
-            const invStore = d.createObjectStore('invoices', { keyPath: 'id' });
-            invStore.createIndex('invoiceNo', 'invoiceNo', { unique: false });
-            invStore.createIndex('updatedAt', 'updatedAt', { unique: false });
-          }
-          if (!d.objectStoreNames.contains('products')) {
-            const prodStore = d.createObjectStore('products', { keyPath: 'id' });
-            prodStore.createIndex('updatedAt', 'updatedAt', { unique: false });
-          }
-          if (!d.objectStoreNames.contains('parties')) {
-            const partStore = d.createObjectStore('parties', { keyPath: 'id' });
-            partStore.createIndex('updatedAt', 'updatedAt', { unique: false });
-          }
-          if (!d.objectStoreNames.contains('settings')) {
-            d.createObjectStore('settings', { keyPath: 'key' });
-          }
-          if (!d.objectStoreNames.contains('outbox')) {
-            const outStore = d.createObjectStore('outbox', { keyPath: 'id' });
-            outStore.createIndex('createdAt', 'createdAt', { unique: false });
-          }
-        };
-
-        req.onsuccess = async (e) => {
-          this.db = e.target.result;
-          this.isReady = true;
-          await this.migrateFromLocalStorage();
-          await this.loadAllToMemory();
-          this.startOutboxWorker();
-          resolve();
-        };
-
-        req.onerror = (e) => {
-          console.warn("IndexedDB init notice:", e.target?.error);
-          this.isReady = true;
-          this.startOutboxWorker();
-          resolve();
-        };
-      } catch (err) {
-        console.warn("IndexedDB constructor note:", err);
-        this.isReady = true;
-        this.startOutboxWorker();
-        resolve();
-      }
-    });
+    this.isReady = true;
+    return Promise.resolve();
   },
-
-  async migrateFromLocalStorage() {
-    if (!this.db) return;
-    try {
-      const migrated = localStorage.getItem("aaryandb_migrated_v2");
-      if (migrated === "true") return;
-
-      let localInvoices = [], localProducts = [], localParties = [], localSettings = {};
-      try { localInvoices = JSON.parse(localStorage.getItem("invoices") || "[]"); } catch (e) {}
-      try { localProducts = JSON.parse(localStorage.getItem("products") || "[]"); } catch (e) {}
-      try { localParties = JSON.parse(localStorage.getItem("parties") || "[]"); } catch (e) {}
-      try { localSettings = JSON.parse(localStorage.getItem("settings") || "{}"); } catch (e) {}
-
-      const tx = this.db.transaction(['invoices', 'products', 'parties', 'settings'], 'readwrite');
-      
-      const invStore = tx.objectStore('invoices');
-      localInvoices.forEach(inv => { if (inv && inv.id) invStore.put(inv); });
-
-      const prodStore = tx.objectStore('products');
-      localProducts.forEach(p => { if (p && p.id) prodStore.put(p); });
-
-      const partStore = tx.objectStore('parties');
-      localParties.forEach(pt => { if (pt && pt.id) partStore.put(pt); });
-
-      const setStore = tx.objectStore('settings');
-      if (localSettings && Object.keys(localSettings).length > 0) {
-        setStore.put({ key: 'globalSettings', data: localSettings });
-      }
-
-      await new Promise(res => { tx.oncomplete = res; tx.onerror = res; });
-      localStorage.setItem("aaryandb_migrated_v2", "true");
-      console.log("⚡ AaryanDB: Migrated database into IndexedDB successfully!");
-    } catch (e) {
-      console.warn("AaryanDB migration notice:", e.message);
-    }
-  },
-
-  async saveInvoice(inv) {
-    if (!this.db || !inv || !inv.id) return;
-    try {
-      const tx = this.db.transaction(['invoices'], 'readwrite');
-      tx.objectStore('invoices').put(inv);
-      await new Promise(r => { tx.oncomplete = r; tx.onerror = r; });
-    } catch(e) { console.warn("AaryanDB saveInvoice notice:", e); }
-  },
-
-  async saveAllInvoices(invoices) {
-    if (!this.db || !Array.isArray(invoices) || invoices.length === 0) return;
-    try {
-      const tx = this.db.transaction(['invoices'], 'readwrite');
-      const store = tx.objectStore('invoices');
-      invoices.forEach(inv => { if (inv && inv.id) store.put(inv); });
-      await new Promise(r => { tx.oncomplete = r; tx.onerror = r; });
-    } catch(e) { console.warn("AaryanDB saveAllInvoices notice:", e); }
-  },
-
-  async deleteInvoice(id) {
-    if (!this.db || !id) return;
-    try {
-      const tx = this.db.transaction(['invoices'], 'readwrite');
-      tx.objectStore('invoices').delete(id);
-      await new Promise(r => { tx.oncomplete = r; tx.onerror = r; });
-    } catch(e) { console.warn("AaryanDB deleteInvoice notice:", e); }
-  },
-
-  async deleteParty(id) {
-    if (!this.db || !id) return;
-    try {
-      const tx = this.db.transaction(['parties'], 'readwrite');
-      tx.objectStore('parties').delete(id);
-      await new Promise(r => { tx.oncomplete = r; tx.onerror = r; });
-    } catch(e) { console.warn("AaryanDB deleteParty notice:", e); }
-  },
-
-  async saveAllProducts(products) {
-    if (!this.db || !Array.isArray(products)) return;
-    try {
-      const tx = this.db.transaction(['products'], 'readwrite');
-      const store = tx.objectStore('products');
-      store.clear();
-      products.forEach(p => { if (p && p.id) store.put(p); });
-      await new Promise(r => { tx.oncomplete = r; tx.onerror = r; });
-    } catch(e) { console.warn("AaryanDB saveAllProducts notice:", e); }
-  },
-
-  async saveAllParties(parties) {
-    if (!this.db || !Array.isArray(parties)) return;
-    try {
-      const tx = this.db.transaction(['parties'], 'readwrite');
-      const store = tx.objectStore('parties');
-      store.clear();
-      parties.forEach(pt => { if (pt && (pt.id || pt.name)) store.put(pt); });
-      await new Promise(r => { tx.oncomplete = r; tx.onerror = r; });
-    } catch(e) { console.warn("AaryanDB saveAllParties notice:", e); }
-  },
-
-  async saveSettings(settings) {
-    if (!this.db || !settings) return;
-    try {
-      const tx = this.db.transaction(['settings'], 'readwrite');
-      tx.objectStore('settings').put({ key: 'globalSettings', data: settings });
-      await new Promise(r => { tx.oncomplete = r; tx.onerror = r; });
-    } catch(e) { console.warn("AaryanDB saveSettings notice:", e); }
-  },
-
-  async loadAllToMemory() {
-    if (!this.db) return;
-    try {
-      const tx = this.db.transaction(['invoices', 'products', 'parties', 'settings'], 'readonly');
-      
-      const invReq = tx.objectStore('invoices').getAll();
-      const prodReq = tx.objectStore('products').getAll();
-      const partReq = tx.objectStore('parties').getAll();
-      const setReq = tx.objectStore('settings').get('globalSettings');
-
-      await new Promise(res => { tx.oncomplete = res; tx.onerror = res; });
-
-      if (Array.isArray(invReq.result) && invReq.result.length > 0) {
-        if (!invoicesDb || invoicesDb.length < invReq.result.length) {
-          invoicesDb = invReq.result;
-          invoicesDb.sort((a, b) => String(a.invoiceNo || "").localeCompare(String(b.invoiceNo || "")));
-          try { localStorage.setItem("invoices", JSON.stringify(invoicesDb)); } catch(e) {}
-        }
-      } else if (invoicesDb && invoicesDb.length > 0) {
-        this.saveAllInvoices(invoicesDb);
-      }
-
-      if (Array.isArray(prodReq.result) && prodReq.result.length > 0) {
-        let idbUpdated = false;
-        prodReq.result.forEach(p => {
-          if (p && p.id === "prod-1" && (p.stock === 127 || p.stock === 130) && !window.recentProductMutations?.["prod-1"]) {
-            p.stock = 0;
-            p.status = "Out of Stock";
-            idbUpdated = true;
-          }
-        });
-        if (idbUpdated) {
-          this.saveAllProducts(prodReq.result);
-        }
-        if (!productsDb || productsDb.length < prodReq.result.length) {
-          productsDb = prodReq.result;
-          try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch(e) {}
-        }
-      } else if (productsDb && productsDb.length > 0) {
-        this.saveAllProducts(productsDb);
-      }
-
-      if (Array.isArray(partReq.result)) {
-        let deletedPartyIds = [];
-        try { deletedPartyIds = JSON.parse(localStorage.getItem("deleted_party_ids")) || []; } catch(e){}
-        const validParties = partReq.result.filter(p => p && !deletedPartyIds.includes(p.id) && !deletedPartyIds.includes(p.name));
-        const storedPartiesRaw = localStorage.getItem("parties");
-        if (storedPartiesRaw === null && validParties.length > 0) {
-          partiesDb = validParties;
-          try { localStorage.setItem("parties", JSON.stringify(partiesDb)); } catch(e) {}
-        } else if (Array.isArray(partiesDb)) {
-          this.saveAllParties(partiesDb);
-        }
-      }
-
-      if (setReq.result && setReq.result.data) {
-        globalSettings = setReq.result.data;
-        try { localStorage.setItem("settings", JSON.stringify(globalSettings)); } catch(e) {}
-      }
-    } catch (e) {
-      console.warn("loadAllToMemory notice:", e);
-    }
-  },
-
-  async getOutboxCount() {
-    if (this.db) {
-      try {
-        const tx = this.db.transaction(['outbox'], 'readonly');
-        const req = tx.objectStore('outbox').count();
-        await new Promise(r => { tx.oncomplete = r; tx.onerror = r; });
-        return req.result || 0;
-      } catch (e) { return 0; }
-    }
-    try {
-      const outbox = JSON.parse(localStorage.getItem("aaryan_outbox") || "[]");
-      return outbox.length;
-    } catch (e) { return 0; }
-  },
-
+  async migrateFromLocalStorage() {},
+  async saveInvoice(inv) {},
+  async saveAllInvoices(invoices) {},
+  async deleteInvoice(id) {},
+  async deleteParty(id) {},
+  async saveAllProducts(products) {},
+  async saveAllParties(parties) {},
+  async saveSettings(settings) {},
+  async loadAllToMemory() {},
+  async getOutboxCount() { return 0; },
   async searchInvoicesCursor(query = '', limit = 50) {
     const q = (query || '').toLowerCase().trim();
-    if (!q) {
-      return (invoicesDb || []).slice(0, limit);
-    }
-
-    // Fast search in memory
-    const memoryResults = (invoicesDb || []).filter(i => {
+    if (!q) return (invoicesDb || []).slice(0, limit);
+    return (invoicesDb || []).filter(i => {
       const invNo = String(i.invoiceNo || "").toLowerCase();
       const custName = String(i.customerName || (i.details?.buyer?.name) || (i.details?.consignee?.name) || "").toLowerCase();
       return invNo.includes(q) || custName.includes(q);
     }).slice(0, limit);
-
-    if (memoryResults.length > 0 || !this.db) {
-      return memoryResults;
-    }
-
-    return new Promise((resolve) => {
-      try {
-        const tx = this.db.transaction(['invoices'], 'readonly');
-        const store = tx.objectStore('invoices');
-        const results = [];
-
-        const req = store.openCursor(null, 'prev');
-        req.onsuccess = (e) => {
-          const cursor = e.target.result;
-          if (cursor && results.length < limit) {
-            const inv = cursor.value;
-            const invNo = String(inv.invoiceNo || "").toLowerCase();
-            const custName = String(inv.customerName || (inv.details?.buyer?.name) || (inv.details?.consignee?.name) || "").toLowerCase();
-            if (invNo.includes(q) || custName.includes(q)) {
-              results.push(inv);
-            }
-            cursor.continue();
-          } else {
-            resolve(results.length > 0 ? results : memoryResults);
-          }
-        };
-        req.onerror = () => resolve(memoryResults);
-      } catch (e) {
-        resolve(memoryResults);
-      }
-    });
   },
-
-  // Write-Ahead Outbox Queue Manager
-  async enqueueOutbox(type, action, payload) {
-    const op = {
-      id: 'out_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
-      type,
-      action,
-      payload,
-      createdAt: Date.now(),
-      retries: 0
-    };
-
-    if (this.db) {
-      try {
-        const tx = this.db.transaction(['outbox'], 'readwrite');
-        tx.objectStore('outbox').put(op);
-      } catch (e) {}
-    } else {
-      try {
-        const outbox = JSON.parse(localStorage.getItem("aaryan_outbox") || "[]");
-        outbox.push(op);
-        localStorage.setItem("aaryan_outbox", JSON.stringify(outbox));
-      } catch (e) {}
-    }
-  },
-
-  startOutboxWorker() {
-    if (this.outboxTimer) clearInterval(this.outboxTimer);
-    // Drain outbox every 4 seconds or when device regains network
-    this.outboxTimer = setInterval(() => this.drainOutbox(), 4000);
-    window.addEventListener('online', () => this.drainOutbox());
-  },
-
-  async drainOutbox() {
-    if (this.isDrainingOutbox) return;
-    this.isDrainingOutbox = true;
-
-    try {
-      let pendingOps = [];
-      if (this.db) {
-        const tx = this.db.transaction(['outbox'], 'readonly');
-        const req = tx.objectStore('outbox').getAll();
-        await new Promise(r => { tx.oncomplete = r; tx.onerror = r; });
-        pendingOps = req.result || [];
-      } else {
-        pendingOps = JSON.parse(localStorage.getItem("aaryan_outbox") || "[]");
-      }
-
-      if (!pendingOps || pendingOps.length === 0) {
-        this.isDrainingOutbox = false;
-        return;
-      }
-
-      // Direct Google Apps Script Serverless Backend Dispatch
-      for (const op of pendingOps) {
-        try {
-          let synced = false;
-          let gasPayload = null;
-
-          if (op.type === 'invoice' || op.action === 'save_invoice') {
-            gasPayload = { action: 'save_invoice', auth: API_SECRET_TOKEN, invoice: op.payload?.invoice || op.payload };
-          } else if (op.type === 'product' || op.action === 'save_products') {
-            gasPayload = { action: 'save_products', auth: API_SECRET_TOKEN, products: op.payload?.products || op.payload };
-          } else if (op.type === 'party' || op.action === 'save_parties' || op.type === 'parties') {
-            gasPayload = { action: 'save_parties', auth: API_SECRET_TOKEN, parties: op.payload?.parties || op.payload };
-          } else if (op.type === 'settings' || op.action === 'save_settings') {
-            gasPayload = { action: 'save_settings', auth: API_SECRET_TOKEN, settings: op.payload?.settings || op.payload };
-          } else if (op.type === 'pdf' || op.action === 'upload_pdf') {
-            gasPayload = {
-              action: 'upload_pdf',
-              auth: API_SECRET_TOKEN,
-              token: API_SECRET_TOKEN,
-              invoiceNo: op.payload?.invoiceNo || op.invoiceNo,
-              filename: op.payload?.filename || op.filename,
-              pdfBase64: op.payload?.pdfBase64 || op.pdfBase64
-            };
-          } else if (op.action === 'delete_record') {
-            gasPayload = { action: 'delete_record', auth: API_SECRET_TOKEN, type: op.payload?.type || op.type, id: op.payload?.id };
-          }
-
-          let responseData = null;
-          if (gasPayload) {
-            try {
-              const res = await fetch(GOOGLE_SCRIPT_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify(gasPayload),
-                redirect: 'follow'
-              });
-              if (res.ok) {
-                const data = await res.json();
-                if (data && data.ok) {
-                  synced = true;
-                  responseData = data;
-                }
-              }
-            } catch (netErr) {
-              synced = false;
-            }
-          }
-
-          if (synced) {
-            // Authoritative server updates: if PDF upload returned a URL, attach to matching invoice
-            if ((op.type === 'pdf' || op.action === 'upload_pdf') && responseData && (responseData.pdfUrl || responseData.viewUrl)) {
-              const pUrl = responseData.viewUrl || responseData.pdfUrl;
-              const tNo = String(op.payload?.invoiceNo || op.invoiceNo || "").trim();
-              const match = invoicesDb.find(i => String(i.invoiceNo).trim() === tNo || (i.details && String(i.details.invoiceNo).trim() === tNo));
-              if (match) {
-                match.pdfUrl = pUrl;
-                if (match.details) match.details.pdfUrl = pUrl;
-                try { localStorage.setItem("invoices", JSON.stringify(invoicesDb)); } catch (e) {}
-              }
-            }
-
-            // If save_invoice returned an authoritative server assigned invoice
-            if ((op.type === 'invoice' || op.action === 'save_invoice') && responseData && responseData.invoice) {
-              const serverInv = responseData.invoice;
-              const idx = invoicesDb.findIndex(i => i.id === serverInv.id);
-              if (idx > -1) {
-                invoicesDb[idx] = Object.assign({}, invoicesDb[idx], serverInv);
-                try { localStorage.setItem("invoices", JSON.stringify(invoicesDb)); } catch (e) {}
-              }
-            }
-
-            if (this.db) {
-              const delTx = this.db.transaction(['outbox'], 'readwrite');
-              delTx.objectStore('outbox').delete(op.id);
-            } else {
-              let cur = JSON.parse(localStorage.getItem("aaryan_outbox") || "[]");
-              cur = cur.filter(x => x.id !== op.id);
-              localStorage.setItem("aaryan_outbox", JSON.stringify(cur));
-            }
-          } else {
-            break; // Stop draining until next retry cycle
-          }
-        } catch (itemErr) {
-          break;
-        }
-      }
-    } catch (drainErr) {
-      console.warn("Outbox drain notice:", drainErr.message);
-    } finally {
-      this.isDrainingOutbox = false;
-    }
-  }
+  async enqueueOutbox() {},
+  startOutboxWorker() {},
+  async drainOutbox() {}
 };
 
 window.AaryanDB = AaryanDB;
@@ -1740,7 +1336,7 @@ window.triggerDatabaseSync = async function(forceReload = false) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-  const gasSyncUrl = `${GOOGLE_SCRIPT_URL}?action=sync&token=${encodeURIComponent(API_SECRET_TOKEN)}`;
+  const gasSyncUrl = `${GOOGLE_SCRIPT_URL}?action=sync`;
 
   activeSyncPromise = fetch(gasSyncUrl, {
     signal: controller.signal,
@@ -1772,151 +1368,34 @@ window.triggerDatabaseSync = async function(forceReload = false) {
 
     let changed = false;
 
-    // 1. Authoritative Products directly from Google Database
-    if (Array.isArray(data.products) && data.products.length > 0) {
-      let deletedProdIds = [];
-      try { deletedProdIds = JSON.parse(localStorage.getItem("deleted_product_ids")) || []; } catch(e){}
-      const cleanProds = data.products.filter(p => p && (p.id || p.description) && !deletedProdIds.includes(p.id));
-      
-      let storedMutations = {};
-      try { storedMutations = JSON.parse(localStorage.getItem("recent_product_mutations") || "{}"); } catch(e){}
-
-      // Preserve recent local optimistic mutations (within 5 minutes, persisted in localStorage)
-      const mergedProds = cleanProds.map(serverProd => {
-        const localProd = productsDb.find(p => p && (p.id === serverProd.id || (p.description && serverProd.description && p.description.trim().toLowerCase() === serverProd.description.trim().toLowerCase())));
-        const mutationTime = Math.max(
-          (window.recentProductMutations && window.recentProductMutations[serverProd.id]) || 0,
-          (storedMutations && storedMutations[serverProd.id]) || 0,
-          (window.recentProductMutations && serverProd.description && window.recentProductMutations[serverProd.description]) || 0,
-          (storedMutations && serverProd.description && storedMutations[serverProd.description]) || 0,
-          (localProd && window.recentProductMutations && window.recentProductMutations[localProd.id]) || 0,
-          (localProd && storedMutations && storedMutations[localProd.id]) || 0
-        );
-        const isRecentlyMutated = (Date.now() - mutationTime) < 300000;
-        
-        const rate = Number((isRecentlyMutated && localProd && localProd.rate !== undefined ? localProd.rate : serverProd.rate) || 0);
-        const disc = Number((isRecentlyMutated && localProd && localProd.discount !== undefined ? localProd.discount : (serverProd.discount !== undefined ? serverProd.discount : 0)) || 0);
-        const valAfterDisc = Math.round(Math.max(0, rate - (rate * disc / 100)) * 100) / 100;
-        let stock = Number((isRecentlyMutated && localProd && localProd.stock !== undefined ? localProd.stock : serverProd.stock) || 0);
-        
-        // prod-1 safety check: Invoice #0020 (108) and #0021 (19) have exhausted all 127 units
-        if (!isRecentlyMutated && serverProd.id === "prod-1" && (serverProd.stock === 127 || serverProd.stock === 130)) {
-          const inv21Present = Array.isArray(data.invoices) && data.invoices.some(i => i && (i.invoiceNo === "0021" || i.invoiceNo === 21));
-          if (inv21Present) stock = 0;
-        }
-
-        const totalVal = Math.round((stock * valAfterDisc) * 100) / 100;
-        const status = stock <= 0 ? "Out of Stock" : (stock <= 10 ? "Low Stock" : "In Stock");
-
-        return {
-          ...serverProd,
-          id: (localProd && localProd.id) || serverProd.id,
-          rate,
-          discount: disc,
-          price: valAfterDisc,
-          stock,
-          totalValue: totalVal,
-          status,
-          updatedAt: (isRecentlyMutated && localProd && localProd.updatedAt) || serverProd.updatedAt || new Date().toISOString()
-        };
-      });
-
-      // Retain newly created local products that haven't reached server snapshot yet
-      const recentlyAddedLocalProds = productsDb.filter(localP => {
-        if (!localP) return false;
-        const isRecent = (Date.now() - Math.max(
-          ((window.recentProductMutations && window.recentProductMutations[localP.id]) || 0),
-          ((storedMutations && storedMutations[localP.id]) || 0),
-          ((window.recentProductMutations && localP.description && window.recentProductMutations[localP.description]) || 0),
-          ((storedMutations && localP.description && storedMutations[localP.description]) || 0)
-        )) < 300000;
-        const inServer = cleanProds.some(sp => sp && (sp.id === localP.id || (sp.description && localP.description && sp.description.trim().toLowerCase() === localP.description.trim().toLowerCase())));
-        return isRecent && !inServer;
-      });
-      const allMergedProds = mergedProds.concat(recentlyAddedLocalProds);
-
-      if (JSON.stringify(allMergedProds) !== JSON.stringify(productsDb)) {
-        productsDb = allMergedProds;
-        try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch(e) {}
-        changed = true;
-      }
+    // 1. Authoritative Products directly from Google Database Master
+    if (Array.isArray(data.products)) {
+      productsDb = data.products;
+      window.productsDb = productsDb;
+      changed = true;
     }
 
-    // 2. Authoritative Parties directly from Google Database
-    if (Array.isArray(data.parties) && data.parties.length > 0) {
-      let deletedPartyIds = [];
-      try { deletedPartyIds = JSON.parse(localStorage.getItem("deleted_party_ids")) || []; } catch(e) {}
-      
-      const cleanParties = data.parties.filter(p => p && (p.id || p.name) && !deletedPartyIds.includes(p.id) && !deletedPartyIds.includes(p.name));
-      const mergedParties = cleanParties.map(serverP => {
-        const localP = partiesDb.find(p => p.id === serverP.id);
-        const mutationTime = (window.recentPartyMutations && window.recentPartyMutations[serverP.id]) || 0;
-        const isRecentlyMutated = (Date.now() - mutationTime) < 20000;
-        if (localP && isRecentlyMutated) {
-          return Object.assign({}, serverP, localP);
-        }
-        return serverP;
-      });
-      const recentlyAddedLocalParties = partiesDb.filter(localP => {
-        const isRecent = (Date.now() - ((window.recentPartyMutations && window.recentPartyMutations[localP.id]) || 0)) < 20000;
-        const inServer = cleanParties.some(sp => sp.id === localP.id);
-        return isRecent && !inServer;
-      });
-      const allMergedParties = mergedParties.concat(recentlyAddedLocalParties);
-
-      if (JSON.stringify(allMergedParties) !== JSON.stringify(partiesDb)) {
-        partiesDb = allMergedParties;
-        try { localStorage.setItem("parties", JSON.stringify(partiesDb)); } catch(e) {}
-        changed = true;
-      }
+    // 2. Authoritative Parties directly from Google Database Master
+    if (Array.isArray(data.parties)) {
+      partiesDb = data.parties;
+      window.partiesDb = partiesDb;
+      changed = true;
     }
 
-    // 3. Authoritative Invoices directly from Google Database
+    // 3. Authoritative Invoices directly from Google Database Master
     if (Array.isArray(data.invoices)) {
-      // Never resurrect invoices that have been deleted locally
-      const serverInvoices = window.filterOutDeletedInvoices(data.invoices);
-      const cleanInvoices = serverInvoices.filter(i => i && (i.id || i.invoiceNo));
-      
-      // Retain newly saved local invoices that haven't reached server snapshot yet (within 30 seconds)
-      if (!window.recentInvoiceMutations) window.recentInvoiceMutations = {};
-      const recentlyAddedLocalInvoices = invoicesDb.filter(localInv => {
-        if (!localInv) return false;
-        if (window.isInvoiceDeleted(localInv)) return false;
-        const invId = localInv.id;
-        const invNo = String(localInv.invoiceNo || (localInv.details && localInv.details.invoiceNo) || "").trim();
-        const mutationTime = Math.max(
-          (window.recentInvoiceMutations[invId]) || 0,
-          (window.recentInvoiceMutations[invNo]) || 0
-        );
-        const isRecent = (Date.now() - mutationTime) < 30000;
-        const inServer = cleanInvoices.some(si => si && (si.id === invId || String(si.invoiceNo || (si.details && si.details.invoiceNo) || "").trim() === invNo));
-        return isRecent && !inServer;
-      });
-
-      const allMergedInvoices = window.filterOutDeletedInvoices(cleanInvoices.concat(recentlyAddedLocalInvoices));
-      allMergedInvoices.sort((a, b) => String(a.invoiceNo || "").localeCompare(String(b.invoiceNo || "")));
-      if (JSON.stringify(allMergedInvoices) !== JSON.stringify(invoicesDb)) {
-        invoicesDb = allMergedInvoices;
-        try { localStorage.setItem("invoices", JSON.stringify(invoicesDb)); } catch(e) {}
-        changed = true;
-      }
+      invoicesDb = data.invoices;
+      invoicesDb.sort((a, b) => String(a.invoiceNo || "").localeCompare(String(b.invoiceNo || "")));
+      window.invoicesDb = invoicesDb;
+      changed = true;
     }
 
-    // 4. Authoritative Settings directly from Google Database
-    if (data.globalSettings && Object.keys(data.globalSettings).length > 0) {
-      if (JSON.stringify(data.globalSettings) !== JSON.stringify(globalSettings)) {
-        globalSettings = data.globalSettings;
-        try { localStorage.setItem("settings", JSON.stringify(globalSettings)); } catch(e) {}
-        changed = true;
-      }
-    }
-
-    // Mirror authoritative data to IndexedDB when changed
-    if (changed && window.AaryanDB && window.AaryanDB.isReady) {
-      AaryanDB.saveAllProducts(productsDb);
-      AaryanDB.saveAllParties(partiesDb);
-      AaryanDB.saveAllInvoices(invoicesDb);
-      AaryanDB.saveSettings(globalSettings);
+    // 4. Authoritative Settings directly from Google Database Master
+    const rawSettings = data.settings || data.globalSettings;
+    if (rawSettings && typeof rawSettings === 'object' && Object.keys(rawSettings).length > 0) {
+      globalSettings = Object.assign({}, globalSettings, rawSettings);
+      window.globalSettings = globalSettings;
+      changed = true;
     }
 
     const isFirstHydration = !window.isInitialSyncDone;
@@ -2674,126 +2153,10 @@ function seedDatabasesIfEmpty() {
 }
 
 function loadAllDatabases() {
-  try {
-    let localProds = null, localParties = null, localInvoices = null, localSettings = null;
-    try { localProds = JSON.parse(localStorage.getItem("products") || "[]"); } catch (e) {}
-    try { localParties = JSON.parse(localStorage.getItem("parties") || "[]"); } catch (e) {}
-    try { localInvoices = JSON.parse(localStorage.getItem("invoices") || "[]"); } catch (e) {}
-    try { localSettings = JSON.parse(localStorage.getItem("settings") || "{}"); } catch (e) {}
-
-    if (Array.isArray(localProds) && localProds.length > 0) {
-      productsDb = localProds;
-    } else if (productsDb && productsDb.length > 0) {
-      try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch (e) {}
-    } else if (Array.isArray(localProds)) {
-      productsDb = localProds;
-    }
-
-    // Always prefer localStorage (it reflects the latest user action including deletions).
-    // Only fall back to in-memory if localStorage truly has no data at all (null).
-    if (Array.isArray(localParties)) {
-      partiesDb = localParties; // could be [] (after deletion) — that is correct
-    }
-
-    if (Array.isArray(localInvoices) && localInvoices.length > 0) {
-      invoicesDb = window.filterOutDeletedInvoices(localInvoices);
-      invoicesDb.sort((a, b) => String(a.invoiceNo || "").localeCompare(String(b.invoiceNo || "")));
-    } else if (invoicesDb && invoicesDb.length > 0) {
-      invoicesDb = window.filterOutDeletedInvoices(invoicesDb);
-      try { localStorage.setItem("invoices", JSON.stringify(invoicesDb)); } catch (e) {}
-    } else if (Array.isArray(localInvoices)) {
-      invoicesDb = window.filterOutDeletedInvoices(localInvoices);
-    }
-
-    if (localSettings && typeof localSettings === "object" && Object.keys(localSettings).length > 0) {
-      globalSettings = localSettings;
-    } else if (globalSettings && typeof globalSettings === "object" && Object.keys(globalSettings).length > 0) {
-      try { localStorage.setItem("settings", JSON.stringify(globalSettings)); } catch (e) {}
-    }
-  } catch (err) {
-    console.warn("Unable to parse persisted databases:", err);
-    if (!productsDb) productsDb = [];
-    if (!partiesDb) partiesDb = [];
-    if (!invoicesDb) invoicesDb = [];
-    if (!globalSettings) globalSettings = {};
-  }
-
   window.invoicesDb = invoicesDb;
   window.productsDb = productsDb;
   window.partiesDb = partiesDb;
-
-  // Seed default product catalog ONLY on very first install if never seeded
-  if (!localStorage.getItem("products_seeded") && localStorage.getItem("products") === null && (!productsDb || productsDb.length === 0)) {
-    localStorage.setItem("products_seeded", "true");
-    productsDb = [
-      {
-        id: "prod-1",
-        description: "RALLIMIN ADV + 15 KGs",
-        hsn: "23099090",
-        packSize: "15 KG",
-        unit: "Bucket",
-        rate: 3600,
-        gstRate: 5,
-        discount: 45,
-        stock: 0,
-        status: "Out of Stock",
-        updatedAt: new Date().toISOString()
-      },
-      {
-        id: "prod-2",
-        description: "AQUA PROBIOTIC FEED SUPPLEMENT 1KG",
-        hsn: "23099090",
-        packSize: "1 KG",
-        unit: "Can",
-        rate: 850,
-        gstRate: 5,
-        discount: 10,
-        stock: 100,
-        updatedAt: new Date().toISOString()
-      },
-      {
-        id: "prod-3",
-        description: "ZEOLITE POWDER 25KG BAG",
-        hsn: "28421000",
-        packSize: "25 KG",
-        unit: "Bag",
-        rate: 450,
-        gstRate: 12,
-        discount: 5,
-        stock: 100,
-        updatedAt: new Date().toISOString()
-      }
-    ];
-    try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch (e) {}
-  }
-
-  // Seed default party accounts ONLY on very first install if never seeded
-  if (!localStorage.getItem("parties_seeded") && localStorage.getItem("parties") === null && (!partiesDb || partiesDb.length === 0)) {
-    localStorage.setItem("parties_seeded", "true");
-    partiesDb = [
-      {
-        id: "party-1",
-        type: "receiver",
-        name: "Sree Venkateswara Aqua Farms",
-        address: "D.No 4-12, Main Road, Nizampatnam, Bapatla Dist, AP - 522314",
-        gstin: "37AABCS1429B1Z2",
-        phone: "9848012345",
-        state: "Andhra Pradesh",
-        stateCode: "37"
-      },
-      {
-        id: "party-2",
-        type: "consignee",
-        name: "Coastal Fisheries Syndicate",
-        address: "Plot 18, Harbor Road, Machilipatnam, Krishna Dist, AP - 521001",
-        gstin: "37AABCC9876C1Z8",
-        phone: "9848067890",
-        state: "Andhra Pradesh",
-        stateCode: "37"
-      }
-    ];
-    try { localStorage.setItem("parties", JSON.stringify(partiesDb)); } catch (e) {}
-  }
+  window.globalSettings = globalSettings;
 
   if (!globalSettings.telegram) {
     globalSettings.telegram = {
@@ -11184,13 +10547,7 @@ window.savePartyModal = function(e, andAddAnother = false) {
     partiesDb.push(party);
   }
 
-  if (!window.recentPartyMutations) window.recentPartyMutations = {};
-  window.recentPartyMutations[party.id] = Date.now();
-
-  localStorage.setItem("parties", JSON.stringify(partiesDb));
-  if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllParties(partiesDb);
-  
-  loadPartiesDatabaseLists();
+  renderPartiesLists(partiesDb);
   populateBillingSelectors();
 
   // Instant Cross-Browser Broadcast (< 15ms)
@@ -11357,33 +10714,27 @@ function createPartyListCard(p) {
   return card;
 }
 
-window.deletePartyRowDb = function(id) {
-  if (confirm("Delete this customer party profile permanently?")) {
+window.deletePartyRowDb = async function(id) {
+  if (confirm("Delete this customer party profile permanently from Google Database?")) {
     const targetId = String(id || "").trim();
-    localStorage.setItem("parties_seeded", "true");
-    partiesDb = partiesDb.filter(p => p && String(p.id || "").trim() !== targetId && String(p.name || "").trim() !== targetId);
-    localStorage.setItem("parties", JSON.stringify(partiesDb));
     
-    let deletedPartyIds = [];
-    try {
-      deletedPartyIds = JSON.parse(localStorage.getItem("deleted_party_ids")) || [];
-    } catch (e) { deletedPartyIds = []; }
-    if (targetId && !deletedPartyIds.includes(targetId)) {
-      deletedPartyIds.push(targetId);
-      localStorage.setItem("deleted_party_ids", JSON.stringify(deletedPartyIds));
-    }
-
-    deletePartyFromServer(targetId);
-    if (typeof pushDirectToGoogleDatabase === "function") {
-      try { pushDirectToGoogleDatabase("save_parties", { parties: partiesDb }); } catch(e){}
-    }
-    if (window.AaryanDB) {
-      if (typeof window.AaryanDB.deleteParty === 'function') window.AaryanDB.deleteParty(targetId);
-      if (window.AaryanDB.isReady) window.AaryanDB.saveAllParties(partiesDb);
-    }
-    loadPartiesDatabaseLists();
+    // Instant optimistic UI update in memory
+    partiesDb = partiesDb.filter(p => p && String(p.id || "").trim() !== targetId && String(p.name || "").trim() !== targetId);
+    window.partiesDb = partiesDb;
+    renderPartiesLists(partiesDb);
     populateBillingSelectors();
+    
+    // Direct sync to Google Cloud Database
+    if (typeof pushDirectToGoogleDatabase === "function") {
+      try {
+        await pushDirectToGoogleDatabase("save_parties", { parties: partiesDb });
+        await pushDirectToGoogleDatabase("delete_record", { type: "party", id: targetId });
+      } catch(e){}
+    }
+    
     if (typeof window.broadcastDatabaseMutation === 'function') window.broadcastDatabaseMutation();
+    if (typeof window.triggerDatabaseSync === 'function') await window.triggerDatabaseSync(true);
+    showFloatingToast("✅ Party deleted permanently from Google Database!", "success");
   }
 };
 
