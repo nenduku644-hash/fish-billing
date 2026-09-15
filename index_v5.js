@@ -819,7 +819,18 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
       else partiesDb = JSON.parse(localStorage.getItem("parties") || "[]");
 
       const rawInvs = (Array.isArray(msg.invoices) && msg.invoices.length > 0) ? msg.invoices : JSON.parse(localStorage.getItem("invoices") || "[]");
-      invoicesDb = window.filterOutDeletedInvoices(rawInvs);
+      // ★ Merge: protect recently-saved local invoices from stale peer data
+      const _recentMuts = window.recentInvoiceMutations || {};
+      const _nowMs = Date.now();
+      const _pendingLocal = [];
+      (invoicesDb || []).forEach(inv => {
+        if (!inv || !inv.id) return;
+        const _sAt = _recentMuts[inv.id] || _recentMuts[inv.invoiceNo];
+        if (_sAt && (_nowMs - _sAt) < 120000 && !rawInvs.some(ri => ri && ri.id === inv.id)) {
+          _pendingLocal.push(inv);
+        }
+      });
+      invoicesDb = window.filterOutDeletedInvoices(rawInvs.concat(_pendingLocal));
 
       if (msg.settings && typeof msg.settings === 'object' && Object.keys(msg.settings).length > 0) globalSettings = msg.settings;
       else globalSettings = JSON.parse(localStorage.getItem("settings") || "{}");
@@ -1337,7 +1348,7 @@ window.triggerDatabaseSync = async function(forceReload = false) {
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  const timeoutId = setTimeout(() => controller.abort(), 20000);
 
   const gasSyncUrl = `${GOOGLE_SCRIPT_URL}?action=sync`;
 
@@ -1386,8 +1397,25 @@ window.triggerDatabaseSync = async function(forceReload = false) {
     }
 
     // 3. Authoritative Invoices directly from Google Database Master
+    // ★ MERGE — protect invoices saved locally in the last 2 minutes from being overwritten by stale sync
     if (Array.isArray(data.invoices)) {
-      invoicesDb = data.invoices;
+      const serverInvMap = new Map();
+      data.invoices.forEach(inv => { if (inv && inv.id) serverInvMap.set(inv.id, inv); });
+
+      // Find locally-saved invoices that haven't appeared on the server yet
+      const recentMuts = window.recentInvoiceMutations || {};
+      const now = Date.now();
+      const PROTECT_WINDOW_MS = 120000; // 2 minutes
+      const pendingLocalInvoices = [];
+      (invoicesDb || []).forEach(inv => {
+        if (!inv || !inv.id) return;
+        const savedAt = recentMuts[inv.id] || recentMuts[inv.invoiceNo];
+        if (savedAt && (now - savedAt) < PROTECT_WINDOW_MS && !serverInvMap.has(inv.id)) {
+          pendingLocalInvoices.push(inv);
+        }
+      });
+
+      invoicesDb = data.invoices.concat(pendingLocalInvoices);
       invoicesDb.sort((a, b) => String(a.invoiceNo || "").localeCompare(String(b.invoiceNo || "")));
       window.invoicesDb = invoicesDb;
       changed = true;
@@ -1426,7 +1454,7 @@ window.triggerDatabaseSync = async function(forceReload = false) {
   .catch((err) => {
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {
-      console.warn("Google Apps Script sync timeout (>25s). Serving cached Google database snapshot.");
+      console.warn("Google Apps Script sync timeout (>20s). Serving cached Google database snapshot.");
       if (typeof window.updateCloudSyncBadge === 'function') window.updateCloudSyncBadge("synced");
     } else {
       console.warn("Google Apps Script sync notice:", err.message);
@@ -2960,7 +2988,22 @@ function updateDashboardOverview() {
 
   if (elements.dashboardRecentInvoicesBody) {
     elements.dashboardRecentInvoicesBody.innerHTML = "";
-    const recent = invoicesDb.slice().reverse().slice(0, 5);
+    const recent = invoicesDb.slice().sort((a, b) => {
+      // Sort by creation timestamp descending (newest first)
+      function getTs(inv) {
+        if (!inv) return 0;
+        if (typeof inv.id === 'string' && inv.id.startsWith('inv_')) {
+          const ts = parseInt(inv.id.split('_')[1], 10);
+          if (!isNaN(ts) && ts > 1000000000000) return ts;
+        }
+        if (inv.invoiceDate) {
+          const t = new Date(inv.invoiceDate).getTime();
+          if (!isNaN(t) && t > 0) return t;
+        }
+        return 0;
+      }
+      return getTs(b) - getTs(a);
+    }).slice(0, 5);
     
     if (recent.length === 0) {
       if (isSyncLoading) {
@@ -5887,6 +5930,12 @@ window.saveCurrentInvoiceRecord = async function(actionType = 'save_only', btnEl
     if (!window.recentInvoiceMutations) window.recentInvoiceMutations = {};
     window.recentInvoiceMutations[invoiceRecord.id] = Date.now();
     window.recentInvoiceMutations[invoiceRecord.invoiceNo] = Date.now();
+
+    // ★ IMMEDIATE UI REFRESH — new invoice appears on Dashboard & History instantly
+    try {
+      if (typeof updateDashboardOverview === 'function') updateDashboardOverview();
+      if (typeof loadInvoicesHistoryTable === 'function') loadInvoicesHistoryTable();
+    } catch (uiErr) { console.warn("UI refresh note:", uiErr); }
 
     // Persist to localStorage, IndexedDB & broadcast immediately (< 150ms)
     try {
