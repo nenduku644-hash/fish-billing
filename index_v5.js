@@ -777,7 +777,12 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
       if (typeof loadProductsDatabaseTable === 'function') loadProductsDatabaseTable();
 
     } else if (msg.recordType === 'party') {
-      partiesDb = partiesDb.filter(p => p && p.id !== msg.id);
+      // Remove by id OR name (older parties may not have an id)
+      partiesDb = partiesDb.filter(p => p && p.id !== msg.id && p.name !== msg.id);
+      // Also persist tombstone so sync can't resurrect it
+      let dpi = [];
+      try { dpi = JSON.parse(localStorage.getItem("deleted_party_ids")) || []; } catch(e){}
+      if (!dpi.includes(msg.id)) { dpi.push(msg.id); localStorage.setItem("deleted_party_ids", JSON.stringify(dpi)); }
       try { localStorage.setItem("parties", JSON.stringify(partiesDb)); } catch (e) {}
       if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllParties(partiesDb);
       if (typeof loadPartiesDatabaseLists === 'function') loadPartiesDatabaseLists();
@@ -787,10 +792,15 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
 
   } else if (msg.type === 'DATABASE_MUTATED' || msg.action === 'DATABASE_MUTATED') {
     try {
-      if (Array.isArray(msg.products) && msg.products.length > 0) productsDb = msg.products;
+      let _dpi = []; try { _dpi = JSON.parse(localStorage.getItem("deleted_party_ids")) || []; } catch(e){}
+      let _dpri = []; try { _dpri = JSON.parse(localStorage.getItem("deleted_product_ids")) || []; } catch(e){}
+
+      if (Array.isArray(msg.products) && msg.products.length > 0)
+        productsDb = msg.products.filter(p => p && !_dpri.includes(p.id));
       else productsDb = JSON.parse(localStorage.getItem("products") || "[]");
 
-      if (Array.isArray(msg.parties) && msg.parties.length > 0) partiesDb = msg.parties;
+      if (Array.isArray(msg.parties) && msg.parties.length > 0)
+        partiesDb = msg.parties.filter(p => p && !_dpi.includes(p.id) && !_dpi.includes(p.name));
       else partiesDb = JSON.parse(localStorage.getItem("parties") || "[]");
 
       const rawInvs = (Array.isArray(msg.invoices) && msg.invoices.length > 0) ? msg.invoices : JSON.parse(localStorage.getItem("invoices") || "[]");
@@ -831,12 +841,14 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
       }
     }
     if (Array.isArray(msg.products) && msg.products.length > 0) {
-      productsDb = msg.products;
+      let _dpri2 = []; try { _dpri2 = JSON.parse(localStorage.getItem("deleted_product_ids")) || []; } catch(e){}
+      productsDb = msg.products.filter(p => p && !_dpri2.includes(p.id));
       try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch (e) {}
       if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllProducts(productsDb);
     }
     if (Array.isArray(msg.parties) && msg.parties.length > 0) {
-      partiesDb = msg.parties;
+      let _dpi2 = []; try { _dpi2 = JSON.parse(localStorage.getItem("deleted_party_ids")) || []; } catch(e){}
+      partiesDb = msg.parties.filter(p => p && !_dpi2.includes(p.id) && !_dpi2.includes(p.name));
       try { localStorage.setItem("parties", JSON.stringify(partiesDb)); } catch (e) {}
       if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllParties(partiesDb);
     }
