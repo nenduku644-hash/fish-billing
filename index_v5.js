@@ -1731,7 +1731,9 @@ window.triggerDatabaseSync = async function(forceReload = false) {
 
     // 1. Authoritative Products directly from Google Database
     if (Array.isArray(data.products) && data.products.length > 0) {
-      const cleanProds = data.products.filter(p => p && (p.id || p.description));
+      let deletedProdIds = [];
+      try { deletedProdIds = JSON.parse(localStorage.getItem("deleted_product_ids")) || []; } catch(e){}
+      const cleanProds = data.products.filter(p => p && (p.id || p.description) && !deletedProdIds.includes(p.id));
       
       let storedMutations = {};
       try { storedMutations = JSON.parse(localStorage.getItem("recent_product_mutations") || "{}"); } catch(e){}
@@ -1799,7 +1801,10 @@ window.triggerDatabaseSync = async function(forceReload = false) {
 
     // 2. Authoritative Parties directly from Google Database
     if (Array.isArray(data.parties) && data.parties.length > 0) {
-      const cleanParties = data.parties.filter(p => p && (p.id || p.name));
+      let deletedPartyIds = [];
+      try { deletedPartyIds = JSON.parse(localStorage.getItem("deleted_party_ids")) || []; } catch(e) {}
+      
+      const cleanParties = data.parties.filter(p => p && (p.id || p.name) && !deletedPartyIds.includes(p.id));
       const mergedParties = cleanParties.map(serverP => {
         const localP = partiesDb.find(p => p.id === serverP.id);
         const mutationTime = (window.recentPartyMutations && window.recentPartyMutations[serverP.id]) || 0;
