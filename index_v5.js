@@ -1804,7 +1804,7 @@ window.triggerDatabaseSync = async function(forceReload = false) {
       let deletedPartyIds = [];
       try { deletedPartyIds = JSON.parse(localStorage.getItem("deleted_party_ids")) || []; } catch(e) {}
       
-      const cleanParties = data.parties.filter(p => p && (p.id || p.name) && !deletedPartyIds.includes(p.id));
+      const cleanParties = data.parties.filter(p => p && (p.id || p.name) && !deletedPartyIds.includes(p.id) && !deletedPartyIds.includes(p.name));
       const mergedParties = cleanParties.map(serverP => {
         const localP = partiesDb.find(p => p.id === serverP.id);
         const mutationTime = (window.recentPartyMutations && window.recentPartyMutations[serverP.id]) || 0;
@@ -11053,7 +11053,7 @@ window.openPartyModal = function(type, id = "") {
   document.getElementById("modal-party-state-code").value = "37";
 
   if (id) {
-    const party = partiesDb.find(p => p.id === id);
+    const party = partiesDb.find(p => p.id === id || p.name === id);
     if (party) {
       document.getElementById("party-modal-title").textContent = "Edit Party Profile";
       document.getElementById("modal-party-id").value = party.id;
@@ -11298,8 +11298,8 @@ function createPartyListCard(p) {
     </div>
     <div class="actions-cell" style="display: flex; gap: 4px; align-items: center;">
       ${pendingDues > 0 ? `<button class="action-btn share btn-whatsapp" onclick="sendPartyPaymentReminderWhatsApp('${p.name.replace(/'/g, "\\'")}', '${p.phone || ''}')" title="Send WhatsApp Payment Reminder"><i class="fa-brands fa-whatsapp"></i></button>` : ''}
-      <button class="action-btn edit" onclick="openPartyModal('${p.type}', '${p.id}')" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>
-      <button class="action-btn delete" onclick="deletePartyRowDb('${p.id}')" title="Delete"><i class="fa-solid fa-trash"></i></button>
+      <button class="action-btn edit" onclick="openPartyModal('${p.type}', '${p.id || p.name}')" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>
+      <button class="action-btn delete" onclick="deletePartyRowDb('${p.id || p.name}')" title="Delete"><i class="fa-solid fa-trash"></i></button>
     </div>
   `;
   return card;
@@ -11307,7 +11307,7 @@ function createPartyListCard(p) {
 
 window.deletePartyRowDb = function(id) {
   if (confirm("Delete this customer party profile permanently?")) {
-    partiesDb = partiesDb.filter(p => p.id !== id);
+    partiesDb = partiesDb.filter(p => (p.id !== id) && (p.name !== id));
     localStorage.setItem("parties", JSON.stringify(partiesDb));
     
     let deletedPartyIds = [];
