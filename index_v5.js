@@ -709,7 +709,9 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
 
     // Synchronize new party if included in packet
     if (Array.isArray(msg.parties) && msg.parties.length > 0) {
-      partiesDb = msg.parties;
+      let _dpi = [];
+      try { _dpi = JSON.parse(localStorage.getItem("deleted_party_ids")) || []; } catch(e){}
+      partiesDb = msg.parties.filter(p => p && !_dpi.includes(p.id) && !_dpi.includes(p.name));
       try { localStorage.setItem("parties", JSON.stringify(partiesDb)); } catch (e) {}
       if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllParties(partiesDb);
       if (typeof loadPartiesDatabaseLists === 'function') loadPartiesDatabaseLists();
@@ -725,7 +727,9 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
     }
 
   } else if (msg.type === 'products_saved' && Array.isArray(msg.products)) {
-    productsDb = msg.products;
+    let _dpri = [];
+    try { _dpri = JSON.parse(localStorage.getItem("deleted_product_ids")) || []; } catch(e){}
+    productsDb = msg.products.filter(p => p && !_dpri.includes(p.id));
     try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch (e) {}
     if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllProducts(productsDb);
     if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
@@ -735,7 +739,9 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
     if (typeof window.updateRealtimePresenceHUD === 'function') window.updateRealtimePresenceHUD("live");
 
   } else if (msg.type === 'parties_saved' && Array.isArray(msg.parties)) {
-    partiesDb = msg.parties;
+    let _dpi = [];
+    try { _dpi = JSON.parse(localStorage.getItem("deleted_party_ids")) || []; } catch(e){}
+    partiesDb = msg.parties.filter(p => p && !_dpi.includes(p.id) && !_dpi.includes(p.name));
     try { localStorage.setItem("parties", JSON.stringify(partiesDb)); } catch (e) {}
     if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllParties(partiesDb);
     if (typeof loadPartiesDatabaseLists === 'function') loadPartiesDatabaseLists();
@@ -895,9 +901,12 @@ window.addEventListener('storage', (e) => {
       }
     } else if (e.key === 'parties' && e.newValue) {
       const parsed = JSON.parse(e.newValue);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        partiesDb = parsed;
+      if (Array.isArray(parsed)) {
+        let deletedPartyIds = [];
+        try { deletedPartyIds = JSON.parse(localStorage.getItem("deleted_party_ids")) || []; } catch(e){}
+        partiesDb = parsed.filter(p => p && !deletedPartyIds.includes(p.id) && !deletedPartyIds.includes(p.name));
         if (typeof loadPartiesDatabaseLists === 'function') loadPartiesDatabaseLists();
+        if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
       }
     } else if (e.key === 'recent_product_mutations' && e.newValue) {
       const parsed = JSON.parse(e.newValue);
@@ -1249,22 +1258,33 @@ const AaryanDB = {
     } catch(e) { console.warn("AaryanDB deleteInvoice notice:", e); }
   },
 
+  async deleteParty(id) {
+    if (!this.db || !id) return;
+    try {
+      const tx = this.db.transaction(['parties'], 'readwrite');
+      tx.objectStore('parties').delete(id);
+      await new Promise(r => { tx.oncomplete = r; tx.onerror = r; });
+    } catch(e) { console.warn("AaryanDB deleteParty notice:", e); }
+  },
+
   async saveAllProducts(products) {
-    if (!this.db || !Array.isArray(products) || products.length === 0) return;
+    if (!this.db || !Array.isArray(products)) return;
     try {
       const tx = this.db.transaction(['products'], 'readwrite');
       const store = tx.objectStore('products');
+      store.clear();
       products.forEach(p => { if (p && p.id) store.put(p); });
       await new Promise(r => { tx.oncomplete = r; tx.onerror = r; });
     } catch(e) { console.warn("AaryanDB saveAllProducts notice:", e); }
   },
 
   async saveAllParties(parties) {
-    if (!this.db || !Array.isArray(parties) || parties.length === 0) return;
+    if (!this.db || !Array.isArray(parties)) return;
     try {
       const tx = this.db.transaction(['parties'], 'readwrite');
       const store = tx.objectStore('parties');
-      parties.forEach(pt => { if (pt && pt.id) store.put(pt); });
+      store.clear();
+      parties.forEach(pt => { if (pt && (pt.id || pt.name)) store.put(pt); });
       await new Promise(r => { tx.oncomplete = r; tx.onerror = r; });
     } catch(e) { console.warn("AaryanDB saveAllParties notice:", e); }
   },
@@ -1320,13 +1340,17 @@ const AaryanDB = {
         this.saveAllProducts(productsDb);
       }
 
-      if (Array.isArray(partReq.result) && partReq.result.length > 0) {
-        if (!partiesDb || partiesDb.length < partReq.result.length) {
-          partiesDb = partReq.result;
+      if (Array.isArray(partReq.result)) {
+        let deletedPartyIds = [];
+        try { deletedPartyIds = JSON.parse(localStorage.getItem("deleted_party_ids")) || []; } catch(e){}
+        const validParties = partReq.result.filter(p => p && !deletedPartyIds.includes(p.id) && !deletedPartyIds.includes(p.name));
+        const storedPartiesRaw = localStorage.getItem("parties");
+        if (storedPartiesRaw === null && validParties.length > 0) {
+          partiesDb = validParties;
           try { localStorage.setItem("parties", JSON.stringify(partiesDb)); } catch(e) {}
+        } else if (Array.isArray(partiesDb)) {
+          this.saveAllParties(partiesDb);
         }
-      } else if (partiesDb && partiesDb.length > 0) {
-        this.saveAllParties(partiesDb);
       }
 
       if (setReq.result && setReq.result.data) {
@@ -11326,8 +11350,8 @@ function createPartyListCard(p) {
     </div>
     <div class="actions-cell" style="display: flex; gap: 4px; align-items: center;">
       ${pendingDues > 0 ? `<button class="action-btn share btn-whatsapp" onclick="sendPartyPaymentReminderWhatsApp('${p.name.replace(/'/g, "\\'")}', '${p.phone || ''}')" title="Send WhatsApp Payment Reminder"><i class="fa-brands fa-whatsapp"></i></button>` : ''}
-      <button class="action-btn edit" onclick="openPartyModal('${p.type}', '${p.id || p.name}')" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>
-      <button class="action-btn delete" onclick="deletePartyRowDb('${p.id || p.name}')" title="Delete"><i class="fa-solid fa-trash"></i></button>
+      <button class="action-btn edit" onclick="openPartyModal('${p.type}', '${String(p.id || p.name || '').replace(/'/g, "\\'")}')" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>
+      <button class="action-btn delete" onclick="deletePartyRowDb('${String(p.id || p.name || '').replace(/'/g, "\\'")}')" title="Delete"><i class="fa-solid fa-trash"></i></button>
     </div>
   `;
   return card;
@@ -11353,7 +11377,10 @@ window.deletePartyRowDb = function(id) {
     if (typeof pushDirectToGoogleDatabase === "function") {
       try { pushDirectToGoogleDatabase("save_parties", { parties: partiesDb }); } catch(e){}
     }
-    if (window.AaryanDB && window.AaryanDB.isReady) AaryanDB.saveAllParties(partiesDb);
+    if (window.AaryanDB) {
+      if (typeof window.AaryanDB.deleteParty === 'function') window.AaryanDB.deleteParty(targetId);
+      if (window.AaryanDB.isReady) window.AaryanDB.saveAllParties(partiesDb);
+    }
     loadPartiesDatabaseLists();
     populateBillingSelectors();
     if (typeof window.broadcastDatabaseMutation === 'function') window.broadcastDatabaseMutation();
