@@ -2656,12 +2656,10 @@ function loadAllDatabases() {
       productsDb = localProds;
     }
 
-    if (Array.isArray(localParties) && localParties.length > 0) {
-      partiesDb = localParties;
-    } else if (partiesDb && partiesDb.length > 0) {
-      try { localStorage.setItem("parties", JSON.stringify(partiesDb)); } catch (e) {}
-    } else if (Array.isArray(localParties)) {
-      partiesDb = localParties;
+    // Always prefer localStorage (it reflects the latest user action including deletions).
+    // Only fall back to in-memory if localStorage truly has no data at all (null).
+    if (Array.isArray(localParties)) {
+      partiesDb = localParties; // could be [] (after deletion) — that is correct
     }
 
     if (Array.isArray(localInvoices) && localInvoices.length > 0) {
