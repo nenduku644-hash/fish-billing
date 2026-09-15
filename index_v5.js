@@ -10815,7 +10815,7 @@ function renderProductsTable(records) {
   }
   elements.productsListBody.innerHTML = "";
   if (!records || records.length === 0) {
-    if (!window.isInitialSyncDone || isSyncing) {
+    if (!window.isInitialSyncDone) {
       elements.productsListBody.innerHTML = `
         <tr>
           <td colspan="9" class="text-center text-muted" style="padding: 40px 16px;">
@@ -11165,7 +11165,7 @@ function renderPartiesLists(records) {
   const receivers = records.filter(p => p.type === 'receiver');
   const consignees = records.filter(p => p.type === 'consignee');
 
-  const isPartiesSyncing = !window.isInitialSyncDone || isSyncing;
+  const isPartiesSyncing = !window.isInitialSyncDone;
   if (receivers.length === 0) {
     elements.receiversScrollBox.innerHTML = isPartiesSyncing
       ? `<div class="text-center text-muted padding-20"><i class="fa-solid fa-spinner fa-spin"></i> Syncing clients...</div>`
