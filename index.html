@@ -82,15 +82,8 @@
   <script src="invoice_utils_v5.js?v=338_paid_reminder_symbol_fix"></script>
 </head>
 <body>
-  <script>
-    try {
-      localStorage.setItem("app_locked", "false");
-      localStorage.setItem("app_authenticated", "true");
-    } catch(e) {}
-  </script>
-
-  <!-- HIGH-END LOGIN / LOCK SCREEN OVERLAY (Hidden by default so application opens directly to dashboard) -->
-  <div id="lock-screen-overlay" class="lock-overlay no-print hidden">
+  <!-- HIGH-END LOGIN / LOCK SCREEN OVERLAY (Enforced by default for security) -->
+  <div id="lock-screen-overlay" class="lock-overlay no-print">
     <div class="login-card">
       <div class="login-header">
         <div class="login-logo-wrapper" style="display: flex; align-items: center; justify-content: center; margin-bottom: 10px;">
@@ -104,12 +97,12 @@
         <i class="fa-solid fa-triangle-exclamation"></i> Invalid username or password!
       </div>
       
-      <form id="login-form" onsubmit="submitUnlockLogin(event)">
+      <form id="login-form" onsubmit="event.preventDefault(); submitUnlockLogin(event); return false;">
         <div class="login-input-group">
           <label for="login-username">Username</label>
           <div class="input-icon-wrapper">
             <i class="fa-solid fa-user input-icon"></i>
-            <input type="text" id="login-username" name="username" autocomplete="username" required placeholder="Enter username">
+            <input type="text" id="login-username" name="username" autocomplete="username" required placeholder="Enter username" value="Aaryanaqua">
           </div>
         </div>
         
@@ -141,7 +134,7 @@
     </div>
   </div>
 
-  <div class="dashboard-wrapper">
+  <div class="dashboard-wrapper blur-dashboard-wrapper">
     <div class="mobile-sidebar-overlay" onclick="closeMobileSidebar()"></div>
     
     <!-- LEFT SIDEBAR -->
@@ -4020,7 +4013,7 @@
     </button>
   </nav>
 
-  <script src="index_v5.js?v=363_pure_google_database_no_local_storage"></script>
+  <script src="index_v5.js?v=364_security_lock_enforced_by_default"></script>
 </body>
 </html>
 
