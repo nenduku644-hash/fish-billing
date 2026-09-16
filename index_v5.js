@@ -1738,6 +1738,11 @@ function convertNumberToWords(num) {
     result += ' Only';
   }
   
+  // Guard against duplicate phrases
+  result = result.replace(/(\s*Rupees)+/gi, ' Rupees');
+  result = result.replace(/(\s*Only)+/gi, ' Only');
+  result = result.replace(/Rupees\s+Only\s+Rupees\s+Only/gi, 'Rupees Only');
+  
   return result;
 }
 
@@ -5219,27 +5224,43 @@ async function scanCanvasMultiPass(canvas, startTime) {
     }
 
     // PASS 2: jsQR Standard (Direct Luma, non-inverted)
-    let qr = jsQR(imgData.data, width, height, { inversionAttempts: "dontInvert" });
-    if (qr && qr.data) {
-      return {
-        success: true,
-        text: qr.data,
-        format: "qr_code",
-        method: "jsQR Standard",
-        durationMs: Math.round(performance.now() - startTime)
-      };
+    let qr = null;
+    try {
+      qr = jsQR(imgData.data, width, height, { inversionAttempts: "dontInvert" });
+      if (qr && qr.data) {
+        return {
+          success: true,
+          text: qr.data,
+          format: "qr_code",
+          method: "jsQR Standard",
+          durationMs: Math.round(performance.now() - startTime)
+        };
+      }
+    } catch (e) {
+      console.warn("jsQR Pass 2 error:", e);
     }
 
-    // PASS 3: jsQR Inverted (Dark Theme / White on Black QR)
-    qr = jsQR(imgData.data, width, height, { inversionAttempts: "onlyInvert" });
-    if (qr && qr.data) {
-      return {
-        success: true,
-        text: qr.data,
-        format: "qr_code",
-        method: "jsQR Inverted",
-        durationMs: Math.round(performance.now() - startTime)
-      };
+    // PASS 3: jsQR Inverted (Dark Theme / White on Black QR - Safe manual inversion)
+    try {
+      const invData = new Uint8ClampedArray(imgData.data.length);
+      for (let i = 0; i < imgData.data.length; i += 4) {
+        invData[i] = 255 - imgData.data[i];
+        invData[i + 1] = 255 - imgData.data[i + 1];
+        invData[i + 2] = 255 - imgData.data[i + 2];
+        invData[i + 3] = 255;
+      }
+      qr = jsQR(invData, width, height, { inversionAttempts: "dontInvert" });
+      if (qr && qr.data) {
+        return {
+          success: true,
+          text: qr.data,
+          format: "qr_code",
+          method: "jsQR Inverted",
+          durationMs: Math.round(performance.now() - startTime)
+        };
+      }
+    } catch (e) {
+      console.warn("jsQR Pass 3 error:", e);
     }
 
     // PASS 4: Dynamic Contrast Stretching & Adaptive Binarization
@@ -5580,14 +5601,16 @@ window.processAndRouteDecodedQr = function(rawCode, source = 'upload') {
   if (!rawCode) return;
   const clean = String(rawCode).trim();
 
-  // 1. Invoice Verification QR
-  if (clean.includes("verify_invoice=") || clean.includes("/?verify_invoice=")) {
+  // 1. Invoice Verification QR or Raw Invoice ID
+  if (clean.includes("verify_invoice=") || clean.includes("/?verify_invoice=") || clean.toLowerCase().startsWith("inv_") || clean.toLowerCase().includes("id=inv_")) {
     window.closeBarcodeScannerModal();
     window.playScannerBeep();
     let invNo = clean;
     try {
       if (clean.includes("verify_invoice=")) {
         invNo = clean.split("verify_invoice=")[1].split("&")[0];
+      } else if (clean.includes("id=")) {
+        invNo = clean.split("id=")[1].split("&")[0];
       }
     } catch(e) {}
     invNo = decodeURIComponent(invNo);
@@ -5595,7 +5618,7 @@ window.processAndRouteDecodedQr = function(rawCode, source = 'upload') {
     if (typeof openInvoiceVerificationModal === "function") {
       openInvoiceVerificationModal(invNo, clean);
       if (typeof showFloatingToast === 'function') {
-        showFloatingToast(`🧾 Invoice #${invNo} loaded from device QR! Settle balance below.`, "success", 4000);
+        showFloatingToast(`🧾 Invoice ${invNo.startsWith('inv_') ? invNo : '#' + invNo} loaded!`, "success", 4000);
       }
     }
     return;
@@ -6871,7 +6894,7 @@ function populateA4PrintOverlay(invoice) {
   document.getElementById("p-print-total-amount").textContent = `₹ ${formatCurrency(taxableVal)}`;
 
   const roundedGrandTotal = Math.round(invoice.total || taxableVal);
-  document.getElementById("p-print-amount-words").textContent = "INR " + convertNumberToWords(roundedGrandTotal) + " Rupees Only";
+  document.getElementById("p-print-amount-words").textContent = "INR " + convertNumberToWords(roundedGrandTotal);
 
   // Financial Breakdown Box
   const grossEl = document.getElementById("p-print-gross-amount");
@@ -6953,7 +6976,7 @@ function populateA4PrintOverlay(invoice) {
   document.getElementById("p-print-hsn-total-igst").textContent = totHsnIgst > 0 ? formatCurrency(totHsnIgst) : "NIL";
   document.getElementById("p-print-hsn-total-tax").textContent = totalHsnTaxSum > 0 ? formatCurrency(totalHsnTaxSum) : "NIL";
 
-  document.getElementById("p-print-tax-words").textContent = totalHsnTaxSum > 0 ? (convertNumberToWords(Math.round(totalHsnTaxSum)) + " Rupees Only") : "NIL";
+  document.getElementById("p-print-tax-words").textContent = totalHsnTaxSum > 0 ? convertNumberToWords(Math.round(totalHsnTaxSum)) : "NIL";
   document.getElementById("p-print-sign-company").textContent = company.name ? company.name.toUpperCase() : "AARYAN AQUA NEEDS";
 
   // Bank & Payment QR Code Population
@@ -14245,8 +14268,11 @@ window.openInvoiceVerificationModal = function(invoiceNo, rawUrl = "") {
     urlParams = new URLSearchParams(window.location.search);
   }
 
-  const cleanNo = String(invoiceNo || urlParams.get("verify_invoice") || urlParams.get("invoice") || "").trim();
-  const qId = String(urlParams.get("id") || urlParams.get("inv_id") || "").trim();
+  const cleanNo = String(invoiceNo || urlParams.get("verify_invoice") || urlParams.get("invoice") || urlParams.get("verify") || urlParams.get("id") || "").trim();
+  let qId = String(urlParams.get("id") || urlParams.get("inv_id") || "").trim();
+  if (!qId && cleanNo.toLowerCase().startsWith("inv_")) {
+    qId = cleanNo;
+  }
   const qToken = String(urlParams.get("token") || urlParams.get("qrToken") || urlParams.get("uid") || "").trim();
   const qCust = String(urlParams.get("cust") || "").trim();
   const qTot = parseFloat(urlParams.get("tot")) || 0;
@@ -14292,21 +14318,54 @@ window.openInvoiceVerificationModal = function(invoiceNo, rawUrl = "") {
     modal.classList.remove("hidden");
   };
 
+  const renderInvalidState = () => {
+    if (stateCancelled) stateCancelled.style.display = "none";
+    if (stateInvalid) stateInvalid.style.display = "block";
+    if (stateValid) stateValid.style.display = "none";
+    if (header) header.style.background = "linear-gradient(135deg, #7f1d1d, #991b1b)";
+    if (titleEl) titleEl.textContent = "Invoice Verification — Unverified";
+    if (subtitleEl) subtitleEl.textContent = "Warning: Record Not Found";
+    if (badgeIcon) {
+      badgeIcon.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>';
+      badgeIcon.style.background = "rgba(239, 68, 68, 0.3)";
+    }
+    const invCodeEl = document.getElementById("verify-invalid-code");
+    if (invCodeEl) invCodeEl.textContent = cleanNo || qId || "N/A";
+    if (printBtn) printBtn.style.display = "none";
+
+    modal.classList.remove("hidden");
+  };
+
   // 1. Check Cancelled Registry
   const cancelledInvoices = JSON.parse(localStorage.getItem("cancelled_invoices") || "[]");
   let cancMatch = null;
   if (qId) {
-    cancMatch = cancelledInvoices.find(c => c && String(c.id).trim().toLowerCase() === qId.toLowerCase());
+    cancMatch = cancelledInvoices.find(c => c && (
+      String(c.id).trim().toLowerCase() === qId.toLowerCase() ||
+      String(c.id).trim().toLowerCase().replace(/^inv_/, '') === qId.toLowerCase().replace(/^inv_/, '')
+    ));
   }
   if (!cancMatch && qToken) {
     cancMatch = cancelledInvoices.find(c => c && String(c.token).trim().toLowerCase() === qToken.toLowerCase());
   }
+  if (!cancMatch && cleanNo) {
+    cancMatch = cancelledInvoices.find(c => c && (
+      String(c.invoiceNo || '').trim().toLowerCase() === cleanNo.toLowerCase() ||
+      String(c.id || '').trim().toLowerCase() === cleanNo.toLowerCase()
+    ));
+  }
 
   // 2. Search in active invoicesDb
   let activeInv = null;
-  if (qId) {
-    activeInv = (invoicesDb || []).find(i => i && String(i.id).trim().toLowerCase() === qId.toLowerCase());
+  const lookupId = (qId || (cleanNo.toLowerCase().startsWith("inv_") ? cleanNo : "")).toLowerCase();
+  if (lookupId) {
+    activeInv = (invoicesDb || []).find(i => {
+      if (!i) return false;
+      const iId = String(i.id || (i.details && i.details.id) || "").trim().toLowerCase();
+      return iId === lookupId || iId.replace(/^inv_/, '') === lookupId.replace(/^inv_/, '');
+    });
   }
+
   if (!activeInv && qToken) {
     activeInv = (invoicesDb || []).find(i => i && (
       (i.qrToken && String(i.qrToken).trim().toLowerCase() === qToken.toLowerCase()) ||
@@ -14318,7 +14377,13 @@ window.openInvoiceVerificationModal = function(invoiceNo, rawUrl = "") {
     if (!i) return false;
     const iNo = String(i.invoiceNo || (i.details && i.details.invoiceNo) || "").trim().toLowerCase();
     const cNo = cleanNo.toLowerCase().replace(/^#/, '');
-    return iNo === cNo || iNo === `#${cNo}`;
+    if (iNo === cNo || iNo === `#${cNo}`) return true;
+    const iId = String(i.id || (i.details && i.details.id) || "").trim().toLowerCase();
+    if (iId === cNo || iId === `inv_${cNo}` || iId.replace(/^inv_/, '') === cNo.replace(/^inv_/, '')) return true;
+    const iNoInt = parseInt(iNo.replace(/^#/, ''), 10);
+    const cNoInt = parseInt(cNo, 10);
+    if (!isNaN(iNoInt) && !isNaN(cNoInt) && iNoInt === cNoInt) return true;
+    return false;
   });
 
   // Collision Detection: If active invoice exists with this number, but scanned QR has a different explicit ID or different customer/amount:
@@ -14328,7 +14393,7 @@ window.openInvoiceVerificationModal = function(invoiceNo, rawUrl = "") {
     const activeCust = String(activeByNo.customerName || (activeByNo.details && (activeByNo.details.consignee?.name || activeByNo.details.buyer?.name)) || "").trim().toLowerCase();
     const activeTotal = parseFloat(activeByNo.total || (activeByNo.details && activeByNo.details.total) || 0);
 
-    const isIdMismatch = qId && activeId && qId.toLowerCase() !== activeId;
+    const isIdMismatch = qId && activeId && qId.toLowerCase() !== activeId && qId.toLowerCase().replace(/^inv_/, '') !== activeId.replace(/^inv_/, '');
     const isTokenMismatch = qToken && activeToken && qToken.toLowerCase() !== activeToken;
     const isCustMismatch = qCust && activeCust && !activeCust.includes(qCust.toLowerCase()) && !qCust.toLowerCase().includes(activeCust);
     const isAmtMismatch = qTot > 0 && Math.abs(activeTotal - qTot) > 1.0;
@@ -14372,55 +14437,65 @@ window.openInvoiceVerificationModal = function(invoiceNo, rawUrl = "") {
   }
 
   // 3. Fallback: Parse verification details directly from URL params if guest customer on mobile
-  if (!inv && cleanNo && urlParams.get("verify_invoice")) {
-    const qInvNo = urlParams.get("verify_invoice");
-    if (String(qInvNo).trim().toLowerCase() === cleanNo.toLowerCase()) {
-      const cust = urlParams.get("cust") || "Valued Customer";
-      const phone = urlParams.get("ph") || "";
-      const tot = Number(urlParams.get("tot") || 0);
-      const paid = Number(urlParams.get("paid") || 0);
-      const bal = Number(urlParams.get("bal") || Math.max(0, tot - paid));
-      const dt = urlParams.get("dt") || new Date().toISOString();
+  if (!inv && cleanNo && (urlParams.get("verify_invoice") || urlParams.get("cust") || urlParams.get("tot"))) {
+    const cust = urlParams.get("cust") || "Valued Customer";
+    const phone = urlParams.get("ph") || "";
+    const tot = Number(urlParams.get("tot") || 0);
+    const paid = Number(urlParams.get("paid") || 0);
+    const bal = Number(urlParams.get("bal") || Math.max(0, tot - paid));
+    const dt = urlParams.get("dt") || new Date().toISOString();
 
-      if (tot > 0 || cust !== "Valued Customer") {
-        inv = {
+    if (tot > 0 || (cust && cust !== "Valued Customer")) {
+      inv = {
+        invoiceNo: cleanNo,
+        id: qId || `inv_guest_${cleanNo}`,
+        buyerName: cust,
+        buyerPhone: phone,
+        total: tot,
+        paidAmount: paid,
+        balanceDue: bal,
+        invoiceDate: dt,
+        details: {
           invoiceNo: cleanNo,
-          buyerName: cust,
-          buyerPhone: phone,
+          invoiceDate: dt,
           total: tot,
           paidAmount: paid,
           balanceDue: bal,
-          invoiceDate: dt,
-          details: {
-            invoiceNo: cleanNo,
-            invoiceDate: dt,
-            total: tot,
-            paidAmount: paid,
-            balanceDue: bal,
-            buyer: { name: cust, phone: phone }
-          }
-        };
-      }
+          buyer: { name: cust, phone: phone }
+        }
+      };
     }
   }
 
   if (!inv) {
-    // INVALID / UNVERIFIED STATE
-    if (stateCancelled) stateCancelled.style.display = "none";
-    if (stateInvalid) stateInvalid.style.display = "block";
-    if (stateValid) stateValid.style.display = "none";
-    if (header) header.style.background = "linear-gradient(135deg, #7f1d1d, #991b1b)";
-    if (titleEl) titleEl.textContent = "Invoice Verification — Unverified";
-    if (subtitleEl) subtitleEl.textContent = "Warning: Record Not Found";
-    if (badgeIcon) {
-      badgeIcon.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>';
-      badgeIcon.style.background = "rgba(239, 68, 68, 0.3)";
-    }
-    const invCodeEl = document.getElementById("verify-invalid-code");
-    if (invCodeEl) invCodeEl.textContent = cleanNo || "N/A";
-    if (printBtn) printBtn.style.display = "none";
+    // Before giving up, if we have Google Script URL configured, trigger an active cloud fetch to see if this invoice exists in the master database
+    if (typeof GOOGLE_SCRIPT_URL !== "undefined" && GOOGLE_SCRIPT_URL && !window._isVerifyingCloudSync) {
+      window._isVerifyingCloudSync = true;
+      if (subtitleEl) subtitleEl.textContent = "Querying Cloud Master Database...";
+      if (header) header.style.background = "linear-gradient(135deg, #0284c7, #0369a1)";
+      if (stateInvalid) stateInvalid.style.display = "none";
+      if (modal) modal.classList.remove("hidden");
 
-    modal.classList.remove("hidden");
+      fetch(`${GOOGLE_SCRIPT_URL}?action=sync&_t=${Date.now()}`)
+        .then(r => r.json())
+        .then(data => {
+          window._isVerifyingCloudSync = false;
+          if (data && data.invoices && Array.isArray(data.invoices)) {
+            invoicesDb = data.invoices;
+            window.openInvoiceVerificationModal(cleanNo, rawUrl);
+            return;
+          }
+          renderInvalidState();
+        })
+        .catch(err => {
+          window._isVerifyingCloudSync = false;
+          console.warn("Verification cloud sync failed:", err);
+          renderInvalidState();
+        });
+      return;
+    }
+
+    renderInvalidState();
     return;
   }
 
@@ -14739,7 +14814,7 @@ window.submitInvoicePaymentSettlement = function() {
 window.checkUrlVerificationParams = function() {
   try {
     const urlParams = new URLSearchParams(window.location.search);
-    const verifyInvoiceParam = urlParams.get("verify_invoice") || urlParams.get("invoice") || urlParams.get("verify");
+    const verifyInvoiceParam = urlParams.get("verify_invoice") || urlParams.get("invoice") || urlParams.get("verify") || urlParams.get("id");
     if (verifyInvoiceParam) {
       const targetNo = verifyInvoiceParam.trim();
       const currentUrl = window.location.href;
@@ -14859,5 +14934,244 @@ if (document.readyState === 'loading') {
 } else {
   initDashboardScreenFit();
 }
+
+// ==========================================
+// 🧮 SMART QUICK CALCULATOR & BILL INJECTOR
+// ==========================================
+let calcState = {
+  currentInput: '0',
+  previousInput: '',
+  operator: null,
+  waitingForOperand: false,
+  lastResult: null,
+  history: []
+};
+
+window.toggleQuickCalculator = function() {
+  const modal = document.getElementById("quick-calculator-modal");
+  if (!modal) return;
+  const isHidden = modal.classList.contains("hidden");
+  if (isHidden) {
+    modal.classList.remove("hidden");
+    if (typeof playSubtleClickAudio === "function") playSubtleClickAudio();
+    updateCalcDisplay();
+  } else {
+    modal.classList.add("hidden");
+  }
+};
+
+function updateCalcDisplay() {
+  const display = document.getElementById("calc-display");
+  const historyTape = document.getElementById("calc-history-tape");
+  if (display) {
+    display.value = calcState.currentInput;
+  }
+  if (historyTape) {
+    if (calcState.operator && calcState.previousInput) {
+      const opSym = calcState.operator === '*' ? '×' : (calcState.operator === '/' ? '÷' : (calcState.operator === '-' ? '−' : '+'));
+      historyTape.textContent = `${calcState.previousInput} ${opSym} ${calcState.waitingForOperand ? '' : calcState.currentInput}`;
+    } else if (calcState.history.length > 0) {
+      historyTape.textContent = calcState.history[calcState.history.length - 1];
+    } else {
+      historyTape.textContent = "Ready";
+    }
+  }
+}
+
+window.calcAction = function(type, val) {
+  if (typeof playSubtleClickAudio === "function") playSubtleClickAudio();
+  if (type === 'num') {
+    if (calcState.waitingForOperand) {
+      calcState.currentInput = String(val);
+      calcState.waitingForOperand = false;
+    } else {
+      calcState.currentInput = calcState.currentInput === '0' ? String(val) : calcState.currentInput + val;
+    }
+    if (calcState.currentInput.length > 14) {
+      calcState.currentInput = calcState.currentInput.slice(0, 14);
+    }
+  } else if (type === 'dot') {
+    if (calcState.waitingForOperand) {
+      calcState.currentInput = '0.';
+      calcState.waitingForOperand = false;
+    } else if (!calcState.currentInput.includes('.')) {
+      calcState.currentInput += '.';
+    }
+  } else if (type === 'negate') {
+    if (calcState.currentInput !== '0') {
+      if (calcState.currentInput.startsWith('-')) {
+        calcState.currentInput = calcState.currentInput.slice(1);
+      } else {
+        calcState.currentInput = '-' + calcState.currentInput;
+      }
+    }
+  } else if (type === 'percent') {
+    const num = parseFloat(calcState.currentInput) || 0;
+    if (calcState.operator && calcState.previousInput) {
+      const prev = parseFloat(calcState.previousInput) || 0;
+      const pct = (prev * num) / 100;
+      calcState.currentInput = String(pct);
+    } else {
+      calcState.currentInput = String(num / 100);
+    }
+  } else if (type === 'clear') {
+    calcState.currentInput = '0';
+    calcState.previousInput = '';
+    calcState.operator = null;
+    calcState.waitingForOperand = false;
+    calcState.lastResult = null;
+  } else if (type === 'backspace') {
+    if (!calcState.waitingForOperand) {
+      if (calcState.currentInput.length > 1) {
+        calcState.currentInput = calcState.currentInput.slice(0, -1);
+      } else {
+        calcState.currentInput = '0';
+      }
+    }
+  } else if (type === 'op') {
+    const currentVal = parseFloat(calcState.currentInput) || 0;
+    if (calcState.operator && !calcState.waitingForOperand) {
+      const prevVal = parseFloat(calcState.previousInput) || 0;
+      const res = executeCalcOperation(prevVal, currentVal, calcState.operator);
+      calcState.currentInput = formatCalcResult(res);
+      calcState.previousInput = calcState.currentInput;
+    } else {
+      calcState.previousInput = calcState.currentInput;
+    }
+    calcState.operator = val;
+    calcState.waitingForOperand = true;
+  } else if (type === 'equal') {
+    if (calcState.operator && calcState.previousInput) {
+      const prevVal = parseFloat(calcState.previousInput) || 0;
+      const currentVal = parseFloat(calcState.currentInput) || 0;
+      const res = executeCalcOperation(prevVal, currentVal, calcState.operator);
+      const opSym = calcState.operator === '*' ? '×' : (calcState.operator === '/' ? '÷' : (calcState.operator === '-' ? '−' : '+'));
+      const expr = `${calcState.previousInput} ${opSym} ${calcState.currentInput} = ${formatCalcResult(res)}`;
+      calcState.history.push(expr);
+      if (calcState.history.length > 10) calcState.history.shift();
+      calcState.currentInput = formatCalcResult(res);
+      calcState.previousInput = '';
+      calcState.operator = null;
+      calcState.waitingForOperand = true;
+      calcState.lastResult = res;
+    }
+  }
+  updateCalcDisplay();
+};
+
+function executeCalcOperation(a, b, op) {
+  switch (op) {
+    case '+': return a + b;
+    case '-': return a - b;
+    case '*': return a * b;
+    case '/': return b !== 0 ? a / b : 'Error';
+    default: return b;
+  }
+}
+
+function formatCalcResult(num) {
+  if (num === 'Error') return 'Error';
+  if (isNaN(num) || !isFinite(num)) return '0';
+  const rounded = Math.round(num * 1000000) / 1000000;
+  return String(rounded);
+}
+
+window.insertCalcToBill = function(targetField) {
+  const raw = calcState.currentInput;
+  if (raw === 'Error') return;
+  const val = parseFloat(raw);
+  if (isNaN(val) || val <= 0) {
+    if (typeof showFloatingToast === 'function') {
+      showFloatingToast('Please calculate a valid amount first', 'warning');
+    }
+    return;
+  }
+
+  if (typeof switchTab === 'function') {
+    switchTab('billing');
+  }
+
+  if (targetField === 'rate') {
+    if (typeof elements !== "undefined" && elements.billItemRate) {
+      elements.billItemRate.value = val;
+      if (typeof updateItemAmount === 'function') updateItemAmount();
+      if (typeof showFloatingToast === 'function') {
+        showFloatingToast(`💰 Injected ₹ ${formatCurrency(val)} into Bill Rate!`, 'success');
+      }
+    }
+  } else if (targetField === 'qty') {
+    if (typeof elements !== "undefined" && elements.billItemQty) {
+      elements.billItemQty.value = val;
+      if (typeof updateItemAmount === 'function') updateItemAmount();
+      if (typeof showFloatingToast === 'function') {
+        showFloatingToast(`📦 Injected ${val} into Bill Quantity!`, 'success');
+      }
+    }
+  }
+
+  window.toggleQuickCalculator();
+};
+
+window.copyCalcResult = function() {
+  const display = document.getElementById("calc-display");
+  const val = display ? display.value : calcState.currentInput;
+  if (val && val !== 'Error') {
+    navigator.clipboard.writeText(val).then(() => {
+      if (typeof showFloatingToast === 'function') {
+        showFloatingToast(`📋 Copied "${val}" to clipboard!`, 'info', 2500);
+      }
+    }).catch(() => {
+      if (typeof showFloatingToast === 'function') {
+        showFloatingToast(`Result: ${val}`, 'info');
+      }
+    });
+  }
+};
+
+// Global Calculator Keyboard Listeners
+document.addEventListener('keydown', (e) => {
+  // Alt+C toggles calculator
+  if (e.altKey && (e.key.toLowerCase() === 'c' || e.key.toLowerCase() === 'k')) {
+    e.preventDefault();
+    window.toggleQuickCalculator();
+    return;
+  }
+
+  const modal = document.getElementById("quick-calculator-modal");
+  if (!modal || modal.classList.contains("hidden")) return;
+
+  if (e.key >= '0' && e.key <= '9') {
+    e.preventDefault();
+    window.calcAction('num', e.key);
+  } else if (e.key === '.') {
+    e.preventDefault();
+    window.calcAction('dot');
+  } else if (e.key === '+') {
+    e.preventDefault();
+    window.calcAction('op', '+');
+  } else if (e.key === '-') {
+    e.preventDefault();
+    window.calcAction('op', '-');
+  } else if (e.key === '*' || e.key.toLowerCase() === 'x') {
+    e.preventDefault();
+    window.calcAction('op', '*');
+  } else if (e.key === '/') {
+    e.preventDefault();
+    window.calcAction('op', '/');
+  } else if (e.key === '%') {
+    e.preventDefault();
+    window.calcAction('percent');
+  } else if (e.key === 'Enter' || e.key === '=') {
+    e.preventDefault();
+    window.calcAction('equal');
+  } else if (e.key === 'Backspace') {
+    e.preventDefault();
+    window.calcAction('backspace');
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    window.toggleQuickCalculator();
+  }
+});
+
 
 

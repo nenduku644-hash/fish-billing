@@ -7954,3 +7954,487 @@ section.content-view.hidden {
   font-size: 10px !important;
   font-weight: 700 !important;
 }
+
+/* ==========================================================================
+   🌊 LUMINOUS DEEP OCEAN & LUXURY EMERALD DESIGN SYSTEM (UNIQUE PREMIER UIX)
+   ========================================================================== */
+
+/* 1. Global Atmospheric Canvas & Typography */
+body,
+.dashboard-wrapper,
+.main-content {
+  background: radial-gradient(circle at 50% 0%, #0d1e44 0%, #060c20 60%, #040816 100%) !important;
+  color: #f1f5f9 !important;
+}
+
+/* 2. Frosted Deep Sapphire Top Header */
+.content-header {
+  background: rgba(9, 18, 44, 0.88) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.2) !important;
+}
+
+#current-view-title {
+  color: #ffffff !important;
+  letter-spacing: -0.02em !important;
+}
+
+.breadcrumbs,
+.crumb-root,
+.crumb-active {
+  color: #38bdf8 !important;
+}
+.crumb-sep {
+  color: #64748b !important;
+}
+
+/* 3. Sleek Deep Marine Sidebar */
+.sidebar {
+  background: linear-gradient(180deg, #050a1b 0%, #030610 100%) !important;
+  border-right: 1px solid rgba(56, 189, 248, 0.14) !important;
+  box-shadow: 4px 0 30px rgba(0, 0, 0, 0.5) !important;
+}
+
+.sidebar-brand {
+  border-bottom: 1px solid rgba(56, 189, 248, 0.12) !important;
+}
+
+.nav-link {
+  color: #94a3b8 !important;
+  transition: all 0.2s ease !important;
+}
+
+.nav-link:hover {
+  color: #ffffff !important;
+  background: rgba(56, 189, 248, 0.08) !important;
+}
+
+.nav-item.active .nav-link,
+.nav-link.active {
+  background: linear-gradient(90deg, rgba(14, 165, 233, 0.22) 0%, rgba(16, 185, 129, 0.15) 100%) !important;
+  border-left: 3.5px solid #00f2fe !important;
+  color: #ffffff !important;
+  box-shadow: inset 0 0 16px rgba(0, 242, 254, 0.15), 0 0 12px rgba(0, 242, 254, 0.2) !important;
+}
+
+/* 4. Luxury Obsidian & Glass Cards across Tabs */
+.card-box,
+.stat-card,
+.dashboard-hero-card,
+.bottom-stat-card,
+.billing-card,
+.table-card,
+.filter-card,
+.analytics-charts-grid .card-box {
+  background: linear-gradient(145deg, rgba(14, 28, 64, 0.85) 0%, rgba(8, 17, 40, 0.95) 100%) !important;
+  border: 1px solid rgba(56, 189, 248, 0.16) !important;
+  box-shadow: 0 12px 30px -6px rgba(0, 4, 18, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  color: #f1f5f9 !important;
+}
+
+.stat-card:hover,
+.card-box:hover {
+  border-color: rgba(56, 189, 248, 0.45) !important;
+  box-shadow: 0 14px 35px -5px rgba(0, 15, 45, 0.65), 0 0 20px -3px rgba(14, 165, 233, 0.28) !important;
+}
+
+.stat-details h3,
+.card-box-header h3,
+.hero-text-content h2,
+.summary-total h3 {
+  color: #ffffff !important;
+  text-shadow: 0 0 16px rgba(255, 255, 255, 0.15) !important;
+}
+
+.stat-label,
+.card-box-subtitle,
+.hero-text-content p {
+  color: #94a3b8 !important;
+}
+
+.card-box-header {
+  border-bottom: 1px solid rgba(56, 189, 248, 0.14) !important;
+}
+
+/* 5. Deep Obsidian Form Inputs with Glowing Aqua Focus */
+.form-control,
+input.form-control,
+select.form-control,
+textarea.form-control {
+  background-color: #060e24 !important;
+  border: 1px solid rgba(56, 189, 248, 0.25) !important;
+  color: #ffffff !important;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.4) !important;
+}
+
+.form-control:focus,
+input.form-control:focus,
+select.form-control:focus,
+textarea.form-control:focus {
+  border-color: #00f2fe !important;
+  box-shadow: 0 0 0 3px rgba(0, 242, 254, 0.22), 0 0 16px rgba(0, 242, 254, 0.18) !important;
+  background-color: #07122e !important;
+}
+
+.form-control::placeholder {
+  color: #64748b !important;
+}
+
+/* 6. High-Contrast Luminous Tables */
+.table-responsive,
+.dashboard-table,
+.billing-items-table,
+.custom-data-table {
+  background: transparent !important;
+}
+
+.dashboard-table th,
+.billing-items-table th,
+.custom-data-table th,
+table thead th {
+  background: rgba(14, 28, 64, 0.95) !important;
+  color: #38bdf8 !important;
+  font-weight: 700 !important;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.24) !important;
+  border-top: none !important;
+}
+
+.dashboard-table td,
+.billing-items-table td,
+.custom-data-table td,
+table tbody td {
+  color: #f1f5f9 !important;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.09) !important;
+}
+
+.dashboard-table tbody tr:hover td,
+.billing-items-table tbody tr:hover td,
+.custom-data-table tbody tr:hover td,
+table tbody tr:hover td {
+  background: rgba(14, 165, 233, 0.1) !important;
+}
+
+/* 7. Action Badges and Pills */
+.badge-status,
+.badge-paid,
+.badge-unpaid,
+.badge-partial {
+  font-weight: 700 !important;
+  letter-spacing: 0.02em !important;
+}
+
+.badge-paid {
+  background: rgba(16, 185, 129, 0.18) !important;
+  color: #34d399 !important;
+  border: 1px solid rgba(16, 185, 129, 0.45) !important;
+}
+
+.badge-unpaid {
+  background: rgba(244, 63, 94, 0.18) !important;
+  color: #fb7185 !important;
+  border: 1px solid rgba(244, 63, 94, 0.45) !important;
+}
+
+.badge-partial {
+  background: rgba(245, 158, 11, 0.18) !important;
+  color: #fbbf24 !important;
+  border: 1px solid rgba(245, 158, 11, 0.45) !important;
+}
+
+/* 8. Quick Calculator Component Styles */
+#quick-calculator-modal {
+  z-index: 2147483640 !important;
+}
+
+.calculator-card {
+  width: 100%;
+  max-width: 360px;
+  background: linear-gradient(165deg, #0f1c3f 0%, #09132b 100%);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  border-radius: 20px;
+  box-shadow: 0 25px 60px -12px rgba(0, 0, 0, 0.7), 0 0 35px -5px rgba(14, 165, 233, 0.25);
+  overflow: hidden;
+  padding: 18px;
+  animation: modalPopIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.calc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.calc-header-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.calc-icon-glow {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(16, 185, 129, 0.25));
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  box-shadow: 0 0 15px rgba(56, 189, 248, 0.3);
+}
+
+.calc-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.calc-subtitle {
+  font-size: 11px;
+  color: #94a3b8;
+  display: block;
+}
+
+.calc-close-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #cbd5e1;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.calc-close-btn:hover {
+  background: rgba(244, 63, 94, 0.2);
+  color: #f43f5e;
+  border-color: rgba(244, 63, 94, 0.4);
+}
+
+.calc-screen-wrap {
+  background: #040916;
+  border: 1.5px solid rgba(56, 189, 248, 0.3);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.6);
+  text-align: right;
+}
+
+.calc-history-tape {
+  font-size: 12px;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  color: #64748b;
+  min-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calc-display {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 28px;
+  font-weight: 700;
+  color: #38bdf8;
+  text-align: right;
+  letter-spacing: -0.5px;
+  text-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+}
+
+.calc-inject-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr 0.8fr;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.calc-inject-btn {
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+  border: 1px solid transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: all 0.18s ease;
+}
+
+.calc-inject-btn.rate-inject {
+  background: rgba(16, 185, 129, 0.16);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #34d399;
+}
+.calc-inject-btn.rate-inject:hover {
+  background: rgba(16, 185, 129, 0.28);
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.3);
+}
+
+.calc-inject-btn.qty-inject {
+  background: rgba(14, 165, 233, 0.16);
+  border-color: rgba(14, 165, 233, 0.4);
+  color: #38bdf8;
+}
+.calc-inject-btn.qty-inject:hover {
+  background: rgba(14, 165, 233, 0.28);
+  box-shadow: 0 0 12px rgba(14, 165, 233, 0.3);
+}
+
+.calc-inject-btn.copy-inject {
+  background: rgba(245, 158, 11, 0.16);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+}
+.calc-inject-btn.copy-inject:hover {
+  background: rgba(245, 158, 11, 0.28);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.3);
+}
+
+.calc-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.calc-key {
+  height: 48px;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #f1f5f9;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.calc-key:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(56, 189, 248, 0.3);
+  transform: translateY(-1px);
+}
+
+.calc-key:active {
+  transform: translateY(1px);
+}
+
+.calc-key-fn {
+  background: rgba(244, 63, 94, 0.12);
+  border-color: rgba(244, 63, 94, 0.3);
+  color: #fb7185;
+  font-weight: 700;
+}
+.calc-key-fn:hover {
+  background: rgba(244, 63, 94, 0.25);
+  box-shadow: 0 0 12px rgba(244, 63, 94, 0.3);
+}
+
+.calc-key-op {
+  background: rgba(14, 165, 233, 0.15);
+  border-color: rgba(14, 165, 233, 0.35);
+  color: #38bdf8;
+  font-size: 18px;
+  font-weight: 700;
+}
+.calc-key-op:hover {
+  background: rgba(14, 165, 233, 0.3);
+  box-shadow: 0 0 14px rgba(14, 165, 233, 0.35);
+}
+
+.calc-key-equal {
+  background: linear-gradient(135deg, #0284c7 0%, #0d9488 100%);
+  border-color: rgba(56, 189, 248, 0.6);
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 800;
+  box-shadow: 0 0 16px rgba(14, 165, 233, 0.4);
+}
+.calc-key-equal:hover {
+  background: linear-gradient(135deg, #0369a1 0%, #0f766e 100%);
+  box-shadow: 0 0 22px rgba(14, 165, 233, 0.6);
+}
+
+.calc-footer-tips {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: #64748b;
+  padding: 0 4px;
+}
+
+.calc-footer-tips kbd {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: #94a3b8;
+  font-family: inherit;
+}
+
+/* Header Calculator Pill */
+.calc-pill {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 5px 12px !important;
+  border-radius: 20px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  background: rgba(14, 165, 233, 0.12) !important;
+  color: #38bdf8 !important;
+  border: 1px solid rgba(56, 189, 248, 0.35) !important;
+  cursor: pointer !important;
+  transition: all 0.25s ease !important;
+}
+
+.calc-pill:hover {
+  background: rgba(14, 165, 233, 0.22) !important;
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.4) !important;
+  transform: translateY(-1px);
+}
+
+/* 9. Critical Print Strict Preservation: Keep A4 Printed Invoice Pure White */
+#a4-print-modal-sheet,
+#a4-print-modal-sheet * {
+  background: #ffffff !important;
+  color: #0f172a !important;
+}
+
+#a4-print-modal-sheet table th {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+  border: 1px solid #000000 !important;
+}
+
+#a4-print-modal-sheet table td {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid #000000 !important;
+}
+
+@media print {
+  body, html, .main-content, .dashboard-wrapper {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+}
+

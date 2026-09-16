@@ -83,7 +83,7 @@
   <link rel="preconnect" href="https://script.google.com" crossorigin>
   <link rel="dns-prefetch" href="https://script.google.com">
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="index.css?v=385_trust_shortcuts_speed">
+  <link rel="stylesheet" href="index.css?v=390_ocean_premium_calc_fix">
   <script src="invoice_utils_v5.js?v=338_paid_reminder_symbol_fix"></script>
 </head>
 <body>
@@ -241,6 +241,10 @@
           <div id="cmd-palette-trigger-pill" class="cmd-palette-pill cursor-pointer" onclick="openCommandPalette()" title="Quick Command Palette & Fast Navigation (Ctrl+K or F2)">
             <i class="fa-solid fa-terminal" style="color: #0284c7;"></i>
             <span>Commands <kbd>Ctrl+K</kbd></span>
+          </div>
+          <div id="live-calculator-pill" class="calc-pill cursor-pointer" onclick="toggleQuickCalculator()" title="Quick Calculator & Fast Bill Injection (Alt+C)">
+            <i class="fa-solid fa-calculator" style="color: #38bdf8;"></i>
+            <span>Calc <kbd>Alt+C</kbd></span>
           </div>
           <div id="live-audio-fx-pill" class="audio-fx-pill active cursor-pointer" onclick="toggleAudioFeedback()" title="Billing Audio FX (Click to Mute / Unmute)">
             <i class="fa-solid fa-volume-high" id="audio-fx-icon"></i>
@@ -4156,6 +4160,79 @@
     </div>
   </div>
 
+  <!-- SMART QUICK CALCULATOR MODAL -->
+  <div id="quick-calculator-modal" class="modal-overlay hidden no-print" onclick="if(event.target === this) toggleQuickCalculator()">
+    <div class="calculator-card" role="dialog" aria-label="Quick Calculator">
+      <div class="calc-header">
+        <div class="calc-header-title">
+          <div class="calc-icon-glow">
+            <i class="fa-solid fa-calculator"></i>
+          </div>
+          <div>
+            <h3>Quick Calculator</h3>
+            <span class="calc-subtitle">Instant Billing Math &amp; Injection</span>
+          </div>
+        </div>
+        <button type="button" class="calc-close-btn" onclick="toggleQuickCalculator()" aria-label="Close Calculator">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- Calculator Screen Display -->
+      <div class="calc-screen-wrap">
+        <div id="calc-history-tape" class="calc-history-tape">Ready</div>
+        <input type="text" id="calc-display" class="calc-display" value="0" readonly aria-label="Calculator Result">
+      </div>
+
+      <!-- Quick 1-Tap Bill Injection Actions -->
+      <div class="calc-inject-bar">
+        <button type="button" class="calc-inject-btn rate-inject" onclick="insertCalcToBill('rate')" title="Insert result into Billing Rate input">
+          <i class="fa-solid fa-indian-rupee-sign"></i> Insert Rate
+        </button>
+        <button type="button" class="calc-inject-btn qty-inject" onclick="insertCalcToBill('qty')" title="Insert result into Billing Quantity input">
+          <i class="fa-solid fa-boxes-stacked"></i> Insert Qty
+        </button>
+        <button type="button" class="calc-inject-btn copy-inject" onclick="copyCalcResult()" title="Copy result to clipboard">
+          <i class="fa-solid fa-copy"></i> Copy
+        </button>
+      </div>
+
+      <!-- Keypad Grid -->
+      <div class="calc-grid">
+        <button type="button" class="calc-key calc-key-fn" onclick="calcAction('clear')">AC</button>
+        <button type="button" class="calc-key calc-key-fn" onclick="calcAction('backspace')" title="Backspace">⌫</button>
+        <button type="button" class="calc-key calc-key-fn" onclick="calcAction('percent')">%</button>
+        <button type="button" class="calc-key calc-key-op" onclick="calcAction('op', '/')">÷</button>
+
+        <button type="button" class="calc-key" onclick="calcAction('num', '7')">7</button>
+        <button type="button" class="calc-key" onclick="calcAction('num', '8')">8</button>
+        <button type="button" class="calc-key" onclick="calcAction('num', '9')">9</button>
+        <button type="button" class="calc-key calc-key-op" onclick="calcAction('op', '*')">×</button>
+
+        <button type="button" class="calc-key" onclick="calcAction('num', '4')">4</button>
+        <button type="button" class="calc-key" onclick="calcAction('num', '5')">5</button>
+        <button type="button" class="calc-key" onclick="calcAction('num', '6')">6</button>
+        <button type="button" class="calc-key calc-key-op" onclick="calcAction('op', '-')">−</button>
+
+        <button type="button" class="calc-key" onclick="calcAction('num', '1')">1</button>
+        <button type="button" class="calc-key" onclick="calcAction('num', '2')">2</button>
+        <button type="button" class="calc-key" onclick="calcAction('num', '3')">3</button>
+        <button type="button" class="calc-key calc-key-op" onclick="calcAction('op', '+')">+</button>
+
+        <button type="button" class="calc-key" onclick="calcAction('negate')">±</button>
+        <button type="button" class="calc-key" onclick="calcAction('num', '0')">0</button>
+        <button type="button" class="calc-key" onclick="calcAction('dot')">.</button>
+        <button type="button" class="calc-key calc-key-equal" onclick="calcAction('equal')">=</button>
+      </div>
+
+      <div class="calc-footer-tips">
+        <span><kbd>Alt+C</kbd> Toggle</span>
+        <span><kbd>Enter</kbd> Calculate</span>
+        <span><kbd>Esc</kbd> Close</span>
+      </div>
+    </div>
+  </div>
+
   <!-- DOCKED MOBILE BOTTOM NAVIGATION BAR -->
   <nav class="mobile-bottom-nav no-print" id="mobile-bottom-nav" aria-label="Mobile Navigation">
     <button type="button" class="mobile-bottom-nav-item active" data-bottom-tab="dashboard" onclick="switchTab('dashboard')">
@@ -4182,7 +4259,7 @@
     </button>
   </nav>
 
-  <script src="index_v5.js?v=385_trust_shortcuts_speed"></script>
+  <script src="index_v5.js?v=390_ocean_premium_calc_fix"></script>
 </body>
 </html>
 
