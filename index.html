@@ -69,7 +69,7 @@
       } catch (e) {}
     }
     // Build Version Enforcement: Clears stale caches when new build is deployed
-    window.__APP_BUILD_VERSION__ = "v385_trust_shortcuts_speed";
+    window.__APP_BUILD_VERSION__ = "v395_turbo_google_db_lean";
     try {
       const storedBuild = localStorage.getItem("aaryan_app_build_version");
       if (storedBuild !== window.__APP_BUILD_VERSION__) {
@@ -83,7 +83,7 @@
   <link rel="preconnect" href="https://script.google.com" crossorigin>
   <link rel="dns-prefetch" href="https://script.google.com">
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="index.css?v=390_ocean_premium_calc_fix">
+  <link rel="stylesheet" href="index.css?v=395_turbo_google_db_lean">
   <script src="invoice_utils_v5.js?v=338_paid_reminder_symbol_fix"></script>
 </head>
 <body>
@@ -237,10 +237,6 @@
           <div id="live-data-share-pill" class="data-share-pill cursor-pointer" onclick="openDataSharingModal()" title="Advanced Data Sharing & P2P Quick Sync">
             <i class="fa-solid fa-share-nodes" style="color: #0284c7;"></i>
             <span id="data-share-pill-text">Share Data</span>
-          </div>
-          <div id="cmd-palette-trigger-pill" class="cmd-palette-pill cursor-pointer" onclick="openCommandPalette()" title="Quick Command Palette & Fast Navigation (Ctrl+K or F2)">
-            <i class="fa-solid fa-terminal" style="color: #0284c7;"></i>
-            <span>Commands <kbd>Ctrl+K</kbd></span>
           </div>
           <div id="live-calculator-pill" class="calc-pill cursor-pointer" onclick="toggleQuickCalculator()" title="Quick Calculator & Fast Bill Injection (Alt+C)">
             <i class="fa-solid fa-calculator" style="color: #38bdf8;"></i>
@@ -552,46 +548,6 @@
           </div>
         </div>
 
-        <!-- Professional Enterprise Footer -->
-        <footer class="enterprise-dashboard-footer margin-top-12">
-          <div class="footer-top-row">
-            <div class="footer-brand-col">
-              <div class="footer-brand-header">
-                <img src="rallis_logo.png" alt="Rallis India Limited Logo" class="footer-logo">
-                <div>
-                  <h4>AARYAN AQUA NEEDS</h4>
-                  <span>Quality Products for Better Aquaculture</span>
-                </div>
-              </div>
-              <p class="footer-desc">
-                Authorized Supplier &amp; Technical Distributor of Premium Shrimp &amp; Fish Healthcare Formulations, Probiotics, Minerals, Feed Supplements &amp; Feeds.
-              </p>
-            </div>
-            <div class="footer-trust-col">
-              <h5><i class="fa-solid fa-certificate text-emerald"></i> Trust &amp; Security Guarantee</h5>
-              <div class="footer-trust-list">
-                <div class="trust-list-item"><i class="fa-solid fa-shield-halved text-teal"></i> <span>100% Tax Compliant GST Invoicing</span></div>
-                <div class="trust-list-item"><i class="fa-solid fa-lock text-teal"></i> <span>End-to-End Google Cloud Encrypted</span></div>
-                <div class="trust-list-item"><i class="fa-solid fa-bolt text-amber"></i> <span>Instant WhatsApp Automated Delivery</span></div>
-              </div>
-            </div>
-            <div class="footer-contact-col">
-              <h5><i class="fa-solid fa-headset text-cyan"></i> Help Desk &amp; Quick Action</h5>
-              <div class="footer-quick-btns">
-                <a href="https://wa.me/918367047947" target="_blank" class="footer-btn wa-btn">
-                  <i class="fa-brands fa-whatsapp"></i> Chat Support (+91 8367047947)
-                </a>
-                <button type="button" class="footer-btn shortcuts-btn" onclick="openCommandPalette()">
-                  <i class="fa-solid fa-terminal"></i> Command Palette <span class="kbd-pill">Ctrl+K</span>
-                </button>
-              </div>
-            </div>
-          </div>
-          <div class="footer-bottom-row">
-            <span>&copy; 2026 Aaryan Aqua Needs &bull; All Rights Reserved.</span>
-            <span>Cloud Master Active &bull; Powered by Google Cloud Platform</span>
-          </div>
-        </footer>
       </section>
 
       <!-- VIEW: GST BILLING -->
@@ -3816,10 +3772,6 @@
             <div class="shortcut-keys"><kbd>Alt</kbd> + <kbd>M</kbd></div>
           </div>
           <div class="shortcut-row">
-            <span class="shortcut-label">Command Palette (Search Any)</span>
-            <div class="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>K</kbd> <em>or</em> <kbd>F2</kbd></div>
-          </div>
-          <div class="shortcut-row">
             <span class="shortcut-label">New GST Bill</span>
             <div class="shortcut-keys"><kbd>Alt</kbd> + <kbd>N</kbd></div>
           </div>
@@ -3836,25 +3788,6 @@
       <div class="modal-footer" style="padding: 12px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
         <span style="font-size: 11px; color: #64748b;"><i class="fa-solid fa-circle-info text-teal"></i> Works instantly across billing view</span>
         <button type="button" class="btn btn-secondary" onclick="closeKeyboardShortcutsModal()" style="padding: 6px 16px; font-size: 12.5px; cursor: pointer;">Got It</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- GLOBAL COMMAND PALETTE MODAL (Ultra-Fast Navigation & Instant Actions) -->
-  <div id="global-command-palette-modal" class="cmd-palette-overlay hidden" onclick="if(event.target === this) closeCommandPalette();">
-    <div class="cmd-palette-card" onclick="event.stopPropagation();">
-      <div class="cmd-palette-search-wrapper">
-        <i class="fa-solid fa-terminal cmd-palette-icon"></i>
-        <input type="text" id="cmd-palette-input" class="cmd-palette-input" placeholder="Type a command, customer, product, or invoice... (e.g. New Bill, Devi, Feed)" autocomplete="off" spellcheck="false">
-        <kbd class="cmd-palette-esc-hint" onclick="closeCommandPalette()">ESC</kbd>
-      </div>
-      <div class="cmd-palette-results" id="cmd-palette-results">
-        <!-- Results dynamically populated via renderCommandPalette() -->
-      </div>
-      <div class="cmd-palette-footer">
-        <span><kbd>&uarr;</kbd> <kbd>&darr;</kbd> Navigate</span>
-        <span><kbd>&crarr;</kbd> Select</span>
-        <span><kbd>ESC</kbd> Close</span>
       </div>
     </div>
   </div>
@@ -4259,7 +4192,7 @@
     </button>
   </nav>
 
-  <script src="index_v5.js?v=390_ocean_premium_calc_fix"></script>
+  <script src="index_v5.js?v=395_turbo_google_db_lean"></script>
 </body>
 </html>
 

@@ -1198,14 +1198,19 @@ async function pushDirectToGoogleDatabase(action, payload, maxRetries = 2) {
   const bodyStr = JSON.stringify(gasPayload);
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
     try {
       const res = await fetch(GOOGLE_SCRIPT_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: bodyStr,
         redirect: "follow",
-        keepalive: true
+        keepalive: true,
+        priority: "high",
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
 
       if (res.ok) {
         const text = await res.text();
@@ -1220,11 +1225,12 @@ async function pushDirectToGoogleDatabase(action, payload, maxRetries = 2) {
         }
       }
     } catch (err) {
+      clearTimeout(timeoutId);
       // Network hiccup or concurrency timeout
     }
 
     if (attempt < maxRetries) {
-      const backoffMs = Math.pow(2, attempt) * 300 + Math.floor(Math.random() * 200);
+      const backoffMs = Math.pow(2, attempt) * 80 + Math.floor(Math.random() * 40);
       await new Promise(r => setTimeout(r, backoffMs));
     }
   }
@@ -1354,7 +1360,7 @@ window.triggerDatabaseSync = async function(forceReload = false) {
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 20000);
+  const timeoutId = setTimeout(() => controller.abort(), 6000);
 
   const gasSyncUrl = `${GOOGLE_SCRIPT_URL}?action=sync`;
 
@@ -1362,7 +1368,8 @@ window.triggerDatabaseSync = async function(forceReload = false) {
     signal: controller.signal,
     redirect: 'follow',
     cache: 'no-store',
-    keepalive: true
+    keepalive: true,
+    priority: 'high'
   })
   .then(async (res) => {
     clearTimeout(timeoutId);
@@ -1396,7 +1403,6 @@ window.triggerDatabaseSync = async function(forceReload = false) {
 
     if (data.serverTime) {
       window.lastSyncTimestamp = data.serverTime;
-      localStorage.setItem("aaryan_last_sync_time", String(data.serverTime));
     }
 
     let changed = false;
@@ -1467,7 +1473,7 @@ window.triggerDatabaseSync = async function(forceReload = false) {
   .catch((err) => {
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {
-      console.warn("Google Apps Script sync timeout (>20s). Serving cached Google database snapshot.");
+      console.warn("Google Apps Script sync timeout (>6s). Serving cached Google database snapshot.");
       if (typeof window.updateCloudSyncBadge === 'function') window.updateCloudSyncBadge("synced");
     } else {
       console.warn("Google Apps Script sync notice:", err.message);
@@ -1496,22 +1502,38 @@ try {
   const pingUrl = `${GOOGLE_SCRIPT_URL}?action=ping`;
   const doPing = () => {
     if (navigator.onLine) {
-      fetch(pingUrl, { mode: 'no-cors', cache: 'no-store', keepalive: true }).catch(() => {});
+      fetch(pingUrl, { mode: 'no-cors', cache: 'no-store', keepalive: true, priority: 'low' }).catch(() => {});
     }
   };
-  // Immediate warm-up ping on script load
-  setTimeout(doPing, 100);
-  // Keep-alive ping every 2 minutes to prevent cold starts
-  setInterval(doPing, 120000);
+  // Immediate warm-up ping on script load (0ms)
+  doPing();
+  setTimeout(doPing, 300);
+  // Keep-alive ping every 40 seconds to prevent cold starts
+  setInterval(doPing, 40000);
+  // Prewarm on window focus and online
+  window.addEventListener('focus', doPing);
+  window.addEventListener('online', doPing);
 })();
 
-// Auto-sync heartbeat: refresh data from Google Cloud every 45 seconds
+// Auto-sync heartbeat: refresh data from Google Cloud every 30 seconds or on tab focus
 (function startAutoSyncHeartbeat() {
   setInterval(() => {
     if (navigator.onLine && !isSyncing && document.visibilityState === 'visible') {
       window.triggerDatabaseSync(false);
     }
-  }, 45000);
+  }, 30000);
+
+  window.addEventListener('focus', () => {
+    if (navigator.onLine && !isSyncing) {
+      window.triggerDatabaseSync(false);
+    }
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && navigator.onLine && !isSyncing) {
+      window.triggerDatabaseSync(false);
+    }
+  });
 })();
 
 // --- SECURE GOOGLE DRIVE PDF ARCHIVE & CLOUD SYNC ENGINE ---
@@ -3756,169 +3778,6 @@ function bindBillingFormInputs() {
       modal.style.display = "none";
     }
   };
-
-  // --- GLOBAL COMMAND PALETTE ENGINE ---
-  let cmdPaletteSelectedIndex = 0;
-  let currentCmdPaletteItems = [];
-
-  window.openCommandPalette = function() {
-    const modal = document.getElementById("global-command-palette-modal");
-    const input = document.getElementById("cmd-palette-input");
-    if (modal) {
-      modal.classList.remove("hidden");
-      if (input) {
-        input.value = "";
-        setTimeout(() => input.focus(), 50);
-      }
-      window.renderCommandPalette("");
-    }
-  };
-
-  window.closeCommandPalette = function() {
-    const modal = document.getElementById("global-command-palette-modal");
-    if (modal) {
-      modal.classList.add("hidden");
-    }
-  };
-
-  window.renderCommandPalette = function(query) {
-    const container = document.getElementById("cmd-palette-results");
-    if (!container) return;
-    const q = (query || "").trim().toLowerCase();
-
-    const baseCommands = [
-      { id: "new_bill", cat: "Navigation", label: "New GST Bill", sub: "Create fresh invoice", kbd: "Alt+N", icon: "fa-plus", action: () => { switchTab("billing"); if (typeof autoSuggestInvoiceNo === 'function') autoSuggestInvoiceNo(); } },
-      { id: "tab_dash", cat: "Navigation", label: "Open Dashboard", sub: "Metrics & revenue", kbd: "Alt+D", icon: "fa-chart-line", action: () => switchTab("dashboard") },
-      { id: "tab_hist", cat: "Navigation", label: "Invoice History", sub: "All past invoices", kbd: "Alt+H", icon: "fa-clock-rotate-left", action: () => switchTab("history") },
-      { id: "tab_prod", cat: "Navigation", label: "Product Catalog", sub: "Inventory & stock", kbd: "Alt+P", icon: "fa-cubes", action: () => switchTab("products") },
-      { id: "tab_part", cat: "Navigation", label: "Parties & Clients", sub: "Client accounts", kbd: "Alt+C", icon: "fa-users", action: () => switchTab("parties") },
-      { id: "tab_rep", cat: "Navigation", label: "Reports & GST Analytics", sub: "Monthly tax reports", kbd: "Alt+R", icon: "fa-chart-pie", action: () => switchTab("reports") },
-      { id: "tab_set", cat: "Navigation", label: "Settings", sub: "Preferences & company info", kbd: "Alt+S", icon: "fa-gear", action: () => switchTab("settings") },
-      { id: "sync_now", cat: "Cloud Action", label: "Sync Database to Google Cloud", sub: "Authoritative Cloud Master", kbd: "1s Live", icon: "fa-cloud-arrow-up", action: () => { if (typeof triggerDatabaseSync === 'function') triggerDatabaseSync(true); } },
-      { id: "repeat_last", cat: "Quick Action", label: "Repeat Last Invoice", sub: "Clone recent bill", kbd: "1-Tap", icon: "fa-arrows-rotate", action: () => {
-        const lastInv = (invoicesDb || []).slice().sort((a,b) => String(b.invoiceNo||'').localeCompare(String(a.invoiceNo||'')))[0];
-        if (lastInv && typeof repeatInvoice === 'function') repeatInvoice(lastInv.id);
-        else if (typeof showFloatingToast === 'function') showFloatingToast("No prior invoice to repeat", "warning");
-      }},
-      { id: "scan_qr", cat: "Quick Action", label: "Scan Barcode / QR Code", sub: "Camera or image upload", kbd: "Cam", icon: "fa-barcode", action: () => { if (typeof openBarcodeScannerModal === 'function') openBarcodeScannerModal(); } },
-      { id: "toggle_audio", cat: "Audio", label: "Toggle Audio Feedback", sub: "Mute or unmute clicks", kbd: "Alt+M", icon: "fa-volume-high", action: () => { if (typeof toggleAudioFeedback === 'function') toggleAudioFeedback(); } }
-    ];
-
-    let items = [];
-
-    if (!q) {
-      items = baseCommands;
-    } else {
-      // Filter base commands
-      baseCommands.forEach(cmd => {
-        if (cmd.label.toLowerCase().includes(q) || cmd.sub.toLowerCase().includes(q) || (cmd.cat && cmd.cat.toLowerCase().includes(q))) {
-          items.push(cmd);
-        }
-      });
-
-      // Filter matching products
-      (productsDb || []).filter(p => p && p.description && p.description.toLowerCase().includes(q)).slice(0, 4).forEach(p => {
-        items.push({
-          id: `prod_${p.id}`,
-          cat: "Product Catalog",
-          label: p.description,
-          sub: `₹${p.rate} • ${p.stock || 0} in stock`,
-          kbd: "+ Add",
-          icon: "fa-cube",
-          action: () => {
-            switchTab("billing");
-            if (typeof quickAddProductToBill === 'function') quickAddProductToBill(p.id);
-          }
-        });
-      });
-
-      // Filter matching parties
-      (partiesDb || []).filter(pt => pt && pt.name && pt.name.toLowerCase().includes(q)).slice(0, 3).forEach(pt => {
-        items.push({
-          id: `party_${pt.id || pt.name}`,
-          cat: "Party / Customer",
-          label: pt.name,
-          sub: pt.phone ? `Phone: ${pt.phone}` : (pt.state || "Customer"),
-          kbd: "Bill To",
-          icon: "fa-user-check",
-          action: () => {
-            switchTab("billing");
-            if (elements.billBuyerName) {
-              elements.billBuyerName.value = pt.name;
-              if (typeof onBuyerNameChange === 'function') onBuyerNameChange();
-            }
-          }
-        });
-      });
-
-      // Filter matching invoices
-      (invoicesDb || []).filter(inv => inv && ((inv.invoiceNo && String(inv.invoiceNo).toLowerCase().includes(q)) || (inv.customerName && inv.customerName.toLowerCase().includes(q)))).slice(0, 3).forEach(inv => {
-        items.push({
-          id: `inv_${inv.id}`,
-          cat: "Past Invoice",
-          label: `#${inv.invoiceNo} — ${inv.customerName || 'Customer'}`,
-          sub: `₹${formatCurrency(inv.total)} • ${inv.paymentStatus || 'Paid'}`,
-          kbd: "Repeat",
-          icon: "fa-file-invoice",
-          action: () => {
-            if (typeof repeatInvoice === 'function') repeatInvoice(inv.id);
-          }
-        });
-      });
-    }
-
-    currentCmdPaletteItems = items;
-    cmdPaletteSelectedIndex = Math.min(cmdPaletteSelectedIndex, Math.max(0, items.length - 1));
-
-    if (items.length === 0) {
-      container.innerHTML = `
-        <div style="padding: 24px; text-align: center; color: #94a3b8; font-size: 13px;">
-          <i class="fa-solid fa-magnifying-glass" style="font-size: 20px; display: block; margin-bottom: 8px; color: #cbd5e1;"></i>
-          No commands, products, or customers found for "<strong>${q}</strong>"
-        </div>
-      `;
-      return;
-    }
-
-    let html = "";
-    let currentCat = "";
-    items.forEach((item, idx) => {
-      if (item.cat && item.cat !== currentCat) {
-        currentCat = item.cat;
-        html += `<div class="cmd-category-header">${currentCat}</div>`;
-      }
-      const isSelected = idx === cmdPaletteSelectedIndex;
-      html += `
-        <div class="cmd-item ${isSelected ? 'selected' : ''}" data-index="${idx}" onclick="executeCommandPaletteItem(${idx})">
-          <div class="cmd-item-left">
-            <div class="cmd-item-icon"><i class="fa-solid ${item.icon}"></i></div>
-            <div class="cmd-item-label">${item.label} <span class="cmd-item-sub">${item.sub}</span></div>
-          </div>
-          <span class="cmd-item-kbd">${item.kbd}</span>
-        </div>
-      `;
-    });
-
-    container.innerHTML = html;
-  };
-
-  window.executeCommandPaletteItem = function(index) {
-    if (currentCmdPaletteItems && currentCmdPaletteItems[index]) {
-      const cmd = currentCmdPaletteItems[index];
-      window.closeCommandPalette();
-      if (typeof cmd.action === 'function') {
-        setTimeout(cmd.action, 50);
-      }
-    }
-  };
-
-  function scrollToSelectedCmdItem() {
-    const container = document.getElementById("cmd-palette-results");
-    const sel = container?.querySelector(".cmd-item.selected");
-    if (sel && container) {
-      sel.scrollIntoView({ block: "nearest" });
-    }
-  }
 
   // --- FREQUENT PRODUCTS QUICK-ADD BAR ---
   window.renderFrequentProductsBar = function() {
@@ -6451,12 +6310,8 @@ window.saveCurrentInvoiceRecord = async function(actionType = 'save_only', btnEl
       if (typeof loadInvoicesHistoryTable === 'function') loadInvoicesHistoryTable();
     } catch (uiErr) { console.warn("UI refresh note:", uiErr); }
 
-    // Persist to localStorage, IndexedDB & broadcast immediately (< 150ms)
+    // Pure Google Cloud Master: In-memory commit & instant network sync (< 100ms)
     try {
-      localStorage.setItem("invoices", JSON.stringify(invoicesDb));
-      if (window.AaryanDB && typeof window.AaryanDB.saveInvoice === 'function') {
-        window.AaryanDB.saveInvoice(invoiceRecord);
-      }
       broadcastInterTabEvent('INVOICE_TRANSACTION_COMMITTED', {
         invoice: invoiceRecord,
         stockDeltas: stockDeltas,
@@ -6465,7 +6320,7 @@ window.saveCurrentInvoiceRecord = async function(actionType = 'save_only', btnEl
       });
       syncDatabaseToServer("invoices", invoiceRecord);
     } catch (err) {
-      console.warn("Unable to persist invoices:", err);
+      console.warn("Unable to sync invoice to cloud:", err);
     }
 
     let precomputedBase64 = null;
