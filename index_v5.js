@@ -1456,6 +1456,7 @@ window.triggerDatabaseSync = async function(forceReload = false) {
       if (typeof updateDashboardOverview === 'function') updateDashboardOverview();
       if (typeof calculateSummaryAndTable === 'function') calculateSummaryAndTable();
       if (typeof autoSuggestInvoiceNo === 'function') autoSuggestInvoiceNo();
+      if (typeof renderFrequentProductsBar === 'function') renderFrequentProductsBar();
     }
 
     window.lastSyncTimeMs = Date.now();
@@ -2627,6 +2628,9 @@ window.switchTab = function(tabName) {
     updateDashboardOverview();
   } else if (tabName === 'billing') {
     populateBillingSelectors();
+    if (typeof renderFrequentProductsBar === 'function') {
+      renderFrequentProductsBar();
+    }
     if (!currentInvoice.invoiceNo) {
       autoSuggestInvoiceNo();
     }
@@ -3097,6 +3101,7 @@ function updateDashboardOverview() {
         </td>
         <td class="actions-cell">
           ${balanceQrBtn}
+          <button class="action-btn repeat" onclick="repeatInvoice('${inv.id}')" title="Repeat Bill (Clone to New Invoice)"><i class="fa-solid fa-arrows-rotate" style="color: #6366f1;"></i></button>
           <button class="action-btn edit" onclick="editSavedInvoice('${inv.id}')" title="Edit Invoice"><i class="fa-solid fa-pen-to-square"></i></button>
           <button class="action-btn print" onclick="printSavedInvoice('${inv.id}')" title="Print A4 Tax Invoice"><i class="fa-solid fa-print"></i></button>
           <button class="action-btn print" onclick="printSavedInvoiceThermal('${inv.id}')" title="Print Thermal POS Receipt"><i class="fa-solid fa-receipt"></i></button>
@@ -3108,6 +3113,11 @@ function updateDashboardOverview() {
       `;
       elements.dashboardRecentInvoicesBody.appendChild(tr);
     });
+  }
+
+  // Render the Customer Outstanding & Trust Ledger Card
+  if (typeof window.renderCustomerLedgerSummary === 'function') {
+    window.renderCustomerLedgerSummary();
   }
 }
 
@@ -3725,7 +3735,7 @@ function bindBillingFormInputs() {
     window.playAudioFeedback("click");
   };
 
-  // --- KEYBOARD SHORTCUTS ENGINE ---
+  // --- KEYBOARD SHORTCUTS ENGINE & COMMAND PALETTE ---
   window.openKeyboardShortcutsModal = function() {
     const modal = document.getElementById("keyboard-shortcuts-modal");
     if (modal) {
@@ -3742,26 +3752,478 @@ function bindBillingFormInputs() {
     }
   };
 
+  // --- GLOBAL COMMAND PALETTE ENGINE ---
+  let cmdPaletteSelectedIndex = 0;
+  let currentCmdPaletteItems = [];
+
+  window.openCommandPalette = function() {
+    const modal = document.getElementById("global-command-palette-modal");
+    const input = document.getElementById("cmd-palette-input");
+    if (modal) {
+      modal.classList.remove("hidden");
+      if (input) {
+        input.value = "";
+        setTimeout(() => input.focus(), 50);
+      }
+      window.renderCommandPalette("");
+    }
+  };
+
+  window.closeCommandPalette = function() {
+    const modal = document.getElementById("global-command-palette-modal");
+    if (modal) {
+      modal.classList.add("hidden");
+    }
+  };
+
+  window.renderCommandPalette = function(query) {
+    const container = document.getElementById("cmd-palette-results");
+    if (!container) return;
+    const q = (query || "").trim().toLowerCase();
+
+    const baseCommands = [
+      { id: "new_bill", cat: "Navigation", label: "New GST Bill", sub: "Create fresh invoice", kbd: "Alt+N", icon: "fa-plus", action: () => { switchTab("billing"); if (typeof autoSuggestInvoiceNo === 'function') autoSuggestInvoiceNo(); } },
+      { id: "tab_dash", cat: "Navigation", label: "Open Dashboard", sub: "Metrics & revenue", kbd: "Alt+D", icon: "fa-chart-line", action: () => switchTab("dashboard") },
+      { id: "tab_hist", cat: "Navigation", label: "Invoice History", sub: "All past invoices", kbd: "Alt+H", icon: "fa-clock-rotate-left", action: () => switchTab("history") },
+      { id: "tab_prod", cat: "Navigation", label: "Product Catalog", sub: "Inventory & stock", kbd: "Alt+P", icon: "fa-cubes", action: () => switchTab("products") },
+      { id: "tab_part", cat: "Navigation", label: "Parties & Clients", sub: "Client accounts", kbd: "Alt+C", icon: "fa-users", action: () => switchTab("parties") },
+      { id: "tab_rep", cat: "Navigation", label: "Reports & GST Analytics", sub: "Monthly tax reports", kbd: "Alt+R", icon: "fa-chart-pie", action: () => switchTab("reports") },
+      { id: "tab_set", cat: "Navigation", label: "Settings", sub: "Preferences & company info", kbd: "Alt+S", icon: "fa-gear", action: () => switchTab("settings") },
+      { id: "sync_now", cat: "Cloud Action", label: "Sync Database to Google Cloud", sub: "Authoritative Cloud Master", kbd: "1s Live", icon: "fa-cloud-arrow-up", action: () => { if (typeof triggerDatabaseSync === 'function') triggerDatabaseSync(true); } },
+      { id: "repeat_last", cat: "Quick Action", label: "Repeat Last Invoice", sub: "Clone recent bill", kbd: "1-Tap", icon: "fa-arrows-rotate", action: () => {
+        const lastInv = (invoicesDb || []).slice().sort((a,b) => String(b.invoiceNo||'').localeCompare(String(a.invoiceNo||'')))[0];
+        if (lastInv && typeof repeatInvoice === 'function') repeatInvoice(lastInv.id);
+        else if (typeof showFloatingToast === 'function') showFloatingToast("No prior invoice to repeat", "warning");
+      }},
+      { id: "scan_qr", cat: "Quick Action", label: "Scan Barcode / QR Code", sub: "Camera or image upload", kbd: "Cam", icon: "fa-barcode", action: () => { if (typeof openBarcodeScannerModal === 'function') openBarcodeScannerModal(); } },
+      { id: "toggle_audio", cat: "Audio", label: "Toggle Audio Feedback", sub: "Mute or unmute clicks", kbd: "Alt+M", icon: "fa-volume-high", action: () => { if (typeof toggleAudioFeedback === 'function') toggleAudioFeedback(); } }
+    ];
+
+    let items = [];
+
+    if (!q) {
+      items = baseCommands;
+    } else {
+      // Filter base commands
+      baseCommands.forEach(cmd => {
+        if (cmd.label.toLowerCase().includes(q) || cmd.sub.toLowerCase().includes(q) || (cmd.cat && cmd.cat.toLowerCase().includes(q))) {
+          items.push(cmd);
+        }
+      });
+
+      // Filter matching products
+      (productsDb || []).filter(p => p && p.description && p.description.toLowerCase().includes(q)).slice(0, 4).forEach(p => {
+        items.push({
+          id: `prod_${p.id}`,
+          cat: "Product Catalog",
+          label: p.description,
+          sub: `₹${p.rate} • ${p.stock || 0} in stock`,
+          kbd: "+ Add",
+          icon: "fa-cube",
+          action: () => {
+            switchTab("billing");
+            if (typeof quickAddProductToBill === 'function') quickAddProductToBill(p.id);
+          }
+        });
+      });
+
+      // Filter matching parties
+      (partiesDb || []).filter(pt => pt && pt.name && pt.name.toLowerCase().includes(q)).slice(0, 3).forEach(pt => {
+        items.push({
+          id: `party_${pt.id || pt.name}`,
+          cat: "Party / Customer",
+          label: pt.name,
+          sub: pt.phone ? `Phone: ${pt.phone}` : (pt.state || "Customer"),
+          kbd: "Bill To",
+          icon: "fa-user-check",
+          action: () => {
+            switchTab("billing");
+            if (elements.billBuyerName) {
+              elements.billBuyerName.value = pt.name;
+              if (typeof onBuyerNameChange === 'function') onBuyerNameChange();
+            }
+          }
+        });
+      });
+
+      // Filter matching invoices
+      (invoicesDb || []).filter(inv => inv && ((inv.invoiceNo && String(inv.invoiceNo).toLowerCase().includes(q)) || (inv.customerName && inv.customerName.toLowerCase().includes(q)))).slice(0, 3).forEach(inv => {
+        items.push({
+          id: `inv_${inv.id}`,
+          cat: "Past Invoice",
+          label: `#${inv.invoiceNo} — ${inv.customerName || 'Customer'}`,
+          sub: `₹${formatCurrency(inv.total)} • ${inv.paymentStatus || 'Paid'}`,
+          kbd: "Repeat",
+          icon: "fa-file-invoice",
+          action: () => {
+            if (typeof repeatInvoice === 'function') repeatInvoice(inv.id);
+          }
+        });
+      });
+    }
+
+    currentCmdPaletteItems = items;
+    cmdPaletteSelectedIndex = Math.min(cmdPaletteSelectedIndex, Math.max(0, items.length - 1));
+
+    if (items.length === 0) {
+      container.innerHTML = `
+        <div style="padding: 24px; text-align: center; color: #94a3b8; font-size: 13px;">
+          <i class="fa-solid fa-magnifying-glass" style="font-size: 20px; display: block; margin-bottom: 8px; color: #cbd5e1;"></i>
+          No commands, products, or customers found for "<strong>${q}</strong>"
+        </div>
+      `;
+      return;
+    }
+
+    let html = "";
+    let currentCat = "";
+    items.forEach((item, idx) => {
+      if (item.cat && item.cat !== currentCat) {
+        currentCat = item.cat;
+        html += `<div class="cmd-category-header">${currentCat}</div>`;
+      }
+      const isSelected = idx === cmdPaletteSelectedIndex;
+      html += `
+        <div class="cmd-item ${isSelected ? 'selected' : ''}" data-index="${idx}" onclick="executeCommandPaletteItem(${idx})">
+          <div class="cmd-item-left">
+            <div class="cmd-item-icon"><i class="fa-solid ${item.icon}"></i></div>
+            <div class="cmd-item-label">${item.label} <span class="cmd-item-sub">${item.sub}</span></div>
+          </div>
+          <span class="cmd-item-kbd">${item.kbd}</span>
+        </div>
+      `;
+    });
+
+    container.innerHTML = html;
+  };
+
+  window.executeCommandPaletteItem = function(index) {
+    if (currentCmdPaletteItems && currentCmdPaletteItems[index]) {
+      const cmd = currentCmdPaletteItems[index];
+      window.closeCommandPalette();
+      if (typeof cmd.action === 'function') {
+        setTimeout(cmd.action, 50);
+      }
+    }
+  };
+
+  function scrollToSelectedCmdItem() {
+    const container = document.getElementById("cmd-palette-results");
+    const sel = container?.querySelector(".cmd-item.selected");
+    if (sel && container) {
+      sel.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  // --- FREQUENT PRODUCTS QUICK-ADD BAR ---
+  window.renderFrequentProductsBar = function() {
+    const chipsContainer = document.getElementById("frequent-products-chips");
+    if (!chipsContainer) return;
+
+    // Calculate product frequency across all invoices
+    const freqMap = new Map();
+    (invoicesDb || []).forEach(inv => {
+      const items = inv.items || inv.details?.items || [];
+      items.forEach(it => {
+        const key = (it.productId || it.description || '').trim().toLowerCase();
+        if (key) {
+          freqMap.set(key, (freqMap.get(key) || 0) + (parseFloat(it.quantity) || 1));
+        }
+      });
+    });
+
+    // Score products
+    const rankedProducts = (productsDb || []).slice().sort((a, b) => {
+      const scoreA = freqMap.get(String(a.id || '').toLowerCase()) || freqMap.get(String(a.description || '').trim().toLowerCase()) || 0;
+      const scoreB = freqMap.get(String(b.id || '').toLowerCase()) || freqMap.get(String(b.description || '').trim().toLowerCase()) || 0;
+      return scoreB - scoreA;
+    }).slice(0, 8);
+
+    if (rankedProducts.length === 0) {
+      chipsContainer.innerHTML = `<span style="font-size: 11px; color: #94a3b8; padding: 4px 0;">Add catalog products to see quick-add chips here.</span>`;
+      return;
+    }
+
+    chipsContainer.innerHTML = rankedProducts.map(p => {
+      const rate = formatCurrency(p.rate || 0);
+      const stock = p.stock !== undefined ? parseInt(p.stock, 10) : 0;
+      const stockText = stock > 0 ? `${stock} left` : 'Out of stock';
+      return `
+        <div class="frequent-chip" onclick="quickAddProductToBill('${p.id}')" title="1-Tap Add: ${p.description} (₹${rate})">
+          <i class="fa-solid fa-plus text-teal"></i>
+          <span>${p.description}</span>
+          <span class="chip-price">₹${rate}</span>
+          <span class="chip-stock">${stockText}</span>
+        </div>
+      `;
+    }).join('');
+  };
+
+  window.quickAddProductToBill = function(prodId) {
+    const prod = (productsDb || []).find(p => p && (p.id === prodId || p.description === prodId));
+    if (!prod) {
+      if (typeof showFloatingToast === 'function') showFloatingToast("Product not found in catalog", "warning");
+      return;
+    }
+
+    if (!currentInvoice) currentInvoice = {};
+    if (!Array.isArray(currentInvoice.items)) currentInvoice.items = [];
+
+    // Check if this product is already in the items list
+    const existing = currentInvoice.items.find(it => 
+      (it.productId && it.productId === prod.id) || 
+      (it.description && it.description.trim().toLowerCase() === prod.description.trim().toLowerCase())
+    );
+
+    if (existing) {
+      existing.quantity = (parseFloat(existing.quantity) || 0) + 1;
+      const rate = existing.rate || 0;
+      const disc = existing.discount || 0;
+      const netRate = Math.max(0, rate - (rate * disc / 100));
+      existing.amount = Math.round((netRate * existing.quantity) * 100) / 100;
+      if (typeof showFloatingToast === 'function') {
+        showFloatingToast(`➕ Incremented ${prod.description} to ${existing.quantity} ${existing.unit || 'units'}`, 2500);
+      }
+    } else {
+      const rate = parseFloat(prod.rate) || 0;
+      const unit = prod.unit || "Bucket";
+      const gstRate = parseFloat(prod.gstRate) || 0;
+      currentInvoice.items.push({
+        productId: prod.id,
+        description: prod.description,
+        hsn: prod.hsn || "",
+        quantity: 1,
+        unit: unit,
+        rate: rate,
+        discount: 0,
+        gstRate: gstRate,
+        amount: rate
+      });
+      if (typeof showFloatingToast === 'function') {
+        showFloatingToast(`⚡ 1-Tap Added: ${prod.description} (₹${formatCurrency(rate)})`, 2500);
+      }
+    }
+
+    if (typeof calculateSummaryAndTable === 'function') calculateSummaryAndTable();
+    if (typeof window.playAudioFeedback === 'function') window.playAudioFeedback("add");
+  };
+
+  // --- CUSTOMER OUTSTANDING & TRUST LEDGER SUMMARY ---
+  window.renderCustomerLedgerSummary = function() {
+    const tbody = document.getElementById("dashboard-customer-ledger-body");
+    if (!tbody) return;
+
+    const customerMap = new Map();
+
+    (invoicesDb || []).forEach(inv => {
+      if (!inv) return;
+      const isEst = Boolean(inv.isEstimate || inv.details?.isEstimate || String(inv.invoiceNo || "").startsWith("EST-"));
+      if (isEst) return;
+
+      const details = inv.details || {};
+      const buyer = details.buyer || {};
+      const rawName = (inv.customerName || buyer.name || 'Cash Customer').trim();
+      if (!rawName) return;
+
+      const normKey = rawName.toLowerCase();
+      let record = customerMap.get(normKey);
+      if (!record) {
+        record = {
+          name: rawName,
+          phone: buyer.phone || inv.customerPhone || "",
+          invoiceCount: 0,
+          totalBilled: 0,
+          totalPaid: 0,
+          totalBalance: 0
+        };
+        customerMap.set(normKey, record);
+      }
+
+      if (!record.phone && buyer.phone) record.phone = buyer.phone;
+
+      const payInfo = typeof getInvoicePaidAndBalance === "function" 
+        ? getInvoicePaidAndBalance(inv) 
+        : { total: safeParseAmount(inv.total), paid: safeParseAmount(inv.total), balance: 0 };
+
+      record.invoiceCount += 1;
+      record.totalBilled += payInfo.total;
+      record.totalPaid += payInfo.paid;
+      record.totalBalance += payInfo.balance;
+    });
+
+    const customers = Array.from(customerMap.values()).sort((a, b) => {
+      // Prioritize pending balances first, then highest volume
+      if (b.totalBalance !== a.totalBalance) return b.totalBalance - a.totalBalance;
+      return b.totalBilled - a.totalBilled;
+    });
+
+    if (customers.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="7" class="text-center text-muted" style="padding: 24px;">
+            No customer ledger records yet. Create invoices to track customer outstanding balances here.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = customers.map(cust => {
+      const hasBalance = cust.totalBalance > 0.01;
+      const balPill = hasBalance
+        ? `<span class="ledger-balance-pill pending"><i class="fa-solid fa-clock"></i> ₹${formatCurrency(cust.totalBalance)}</span>`
+        : `<span class="ledger-balance-pill cleared"><i class="fa-solid fa-circle-check"></i> Cleared</span>`;
+
+      const phoneClean = cust.phone ? String(cust.phone).replace(/[^0-9]/g, '') : '';
+      const waActionBtn = phoneClean
+        ? `<a href="https://wa.me/91${phoneClean}?text=${encodeURIComponent(`Dear ${cust.name}, here is your account summary from Aaryan Aqua Needs. Total Billed: ₹${formatCurrency(cust.totalBilled)}, Received: ₹${formatCurrency(cust.totalPaid)}, Current Balance Due: ₹${formatCurrency(cust.totalBalance)}. Thank you!`)}" target="_blank" class="action-btn share btn-whatsapp" title="Send WhatsApp Statement" style="display: inline-flex; align-items: center; justify-content: center;"><i class="fa-brands fa-whatsapp" style="color: #16a34a;"></i></a>`
+        : `<button class="action-btn edit" onclick="startBillForCustomer('${cust.name.replace(/'/g, "\\'")}')" title="New Bill for ${cust.name}"><i class="fa-solid fa-cart-plus"></i></button>`;
+
+      return `
+        <tr>
+          <td>
+            <div class="ledger-cust-name">
+              <i class="fa-solid fa-building-user text-muted" style="font-size: 13px;"></i>
+              <span>${cust.name}</span>
+            </div>
+          </td>
+          <td>${cust.phone ? `<i class="fa-brands fa-whatsapp text-emerald" style="font-size: 11px;"></i> ${cust.phone}` : '<span class="text-muted">—</span>'}</td>
+          <td class="text-center" style="font-weight: 700;">${cust.invoiceCount}</td>
+          <td style="text-align: right; font-weight: 700;">₹ ${formatCurrency(cust.totalBilled)}</td>
+          <td style="text-align: right; color: #059669; font-weight: 700;">₹ ${formatCurrency(cust.totalPaid)}</td>
+          <td style="text-align: right;">${balPill}</td>
+          <td class="text-center actions-cell">
+            ${waActionBtn}
+            <button class="action-btn edit" onclick="startBillForCustomer('${cust.name.replace(/'/g, "\\'")}')" title="New Bill for ${cust.name}"><i class="fa-solid fa-cart-plus"></i></button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  };
+
+  window.startBillForCustomer = function(customerName) {
+    switchTab("billing");
+    if (elements.billBuyerName) {
+      elements.billBuyerName.value = customerName;
+      if (typeof onBuyerNameChange === 'function') onBuyerNameChange();
+      elements.billBuyerName.focus();
+    }
+  };
+
+  // --- ENHANCED KEYBOARD SHORTCUTS CONTROLLER ---
   window.initKeyboardShortcuts = function() {
+    const cmdInput = document.getElementById("cmd-palette-input");
+    if (cmdInput && !cmdInput.dataset.wired) {
+      cmdInput.dataset.wired = "true";
+      cmdInput.addEventListener("input", (e) => {
+        cmdPaletteSelectedIndex = 0;
+        window.renderCommandPalette(e.target.value);
+      });
+
+      cmdInput.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          if (currentCmdPaletteItems.length > 0) {
+            cmdPaletteSelectedIndex = (cmdPaletteSelectedIndex + 1) % currentCmdPaletteItems.length;
+            window.renderCommandPalette(cmdInput.value);
+            scrollToSelectedCmdItem();
+          }
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          if (currentCmdPaletteItems.length > 0) {
+            cmdPaletteSelectedIndex = (cmdPaletteSelectedIndex - 1 + currentCmdPaletteItems.length) % currentCmdPaletteItems.length;
+            window.renderCommandPalette(cmdInput.value);
+            scrollToSelectedCmdItem();
+          }
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          window.executeCommandPaletteItem(cmdPaletteSelectedIndex);
+        } else if (e.key === "Escape") {
+          window.closeCommandPalette();
+        }
+      });
+    }
+
     document.addEventListener("keydown", (e) => {
+      // 1. Escape closes Command Palette, shortcuts modal, and popovers
       if (e.key === "Escape") {
+        window.closeCommandPalette();
         window.closeSmartProductPopover();
         window.closeKeyboardShortcutsModal();
         return;
       }
 
+      // 2. Command Palette: Ctrl+K, Cmd+K, or F2
+      if (((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) || e.key === "F2") {
+        e.preventDefault();
+        const modal = document.getElementById("global-command-palette-modal");
+        if (modal && !modal.classList.contains("hidden")) {
+          window.closeCommandPalette();
+        } else {
+          window.openCommandPalette();
+        }
+        return;
+      }
+
+      // 3. Navigation shortcuts: Alt+N, Alt+D, Alt+H, Alt+P, Alt+R, Alt+S, Alt+C
+      if (e.altKey && (e.key === "n" || e.key === "N")) {
+        e.preventDefault();
+        switchTab("billing");
+        if (typeof autoSuggestInvoiceNo === 'function') autoSuggestInvoiceNo();
+        setTimeout(() => {
+          if (elements.billBuyerName) elements.billBuyerName.focus();
+        }, 100);
+        return;
+      }
+
+      if (e.altKey && (e.key === "d" || e.key === "D")) {
+        e.preventDefault();
+        switchTab("dashboard");
+        return;
+      }
+
+      if (e.altKey && (e.key === "h" || e.key === "H")) {
+        e.preventDefault();
+        switchTab("history");
+        return;
+      }
+
       if (e.altKey && (e.key === "p" || e.key === "P")) {
         e.preventDefault();
-        const searchInput = document.getElementById("smart-product-search");
-        if (searchInput) {
-          const selectedChip = document.getElementById("smart-picker-selected");
-          if (selectedChip && !selectedChip.classList.contains("hidden")) {
-            window.clearSmartProductSelection();
-          } else {
-            searchInput.focus();
-            window.openSmartProductPopover();
+        // If in billing view, focus product search, else switch to products
+        const billingView = document.getElementById("view-billing");
+        if (billingView && !billingView.classList.contains("hidden")) {
+          const searchInput = document.getElementById("smart-product-search");
+          if (searchInput) {
+            const selectedChip = document.getElementById("smart-picker-selected");
+            if (selectedChip && !selectedChip.classList.contains("hidden")) {
+              window.clearSmartProductSelection();
+            } else {
+              searchInput.focus();
+              window.openSmartProductPopover();
+            }
           }
+        } else {
+          switchTab("products");
         }
+        return;
+      }
+
+      if (e.altKey && (e.key === "r" || e.key === "R")) {
+        e.preventDefault();
+        switchTab("reports");
+        return;
+      }
+
+      if (e.altKey && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        switchTab("settings");
+        return;
+      }
+
+      if (e.altKey && (e.key === "c" || e.key === "C")) {
+        e.preventDefault();
+        switchTab("parties");
         return;
       }
 
@@ -3774,12 +4236,6 @@ function bindBillingFormInputs() {
       if (e.altKey && (e.key === "m" || e.key === "M")) {
         e.preventDefault();
         window.toggleAudioFeedback();
-        return;
-      }
-
-      if (e.key === "F2") {
-        e.preventDefault();
-        if (typeof triggerQuickInwardFromBilling === 'function') triggerQuickInwardFromBilling();
         return;
       }
 
@@ -9434,6 +9890,7 @@ function renderHistoryTableRows(records) {
       <td class="actions-cell">
         ${convertEstimateBtn}
         ${balanceQrBtn}
+        <button class="action-btn repeat" onclick="repeatInvoice('${inv.id}')" title="Repeat Bill (Clone to New Invoice)"><i class="fa-solid fa-arrows-rotate" style="color: #6366f1;"></i></button>
         <button class="action-btn edit" onclick="editSavedInvoice('${inv.id}')" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>
         <button class="action-btn print" onclick="printSavedInvoice('${inv.id}')" title="Print A4"><i class="fa-solid fa-print"></i></button>
         <button class="action-btn print" onclick="downloadSavedInvoicePdf('${inv.id}', this)" title="Download PDF"><i class="fa-solid fa-file-pdf text-rose"></i></button>
@@ -9511,6 +9968,83 @@ window.editSavedInvoice = function(id) {
 
     handlePaymentStatusChange();
     calculateSummaryAndTable();
+  }
+};
+
+window.repeatInvoice = function(id) {
+  const inv = (invoicesDb || []).find(i => i && (i.id === id || i.invoiceNo === id));
+  if (!inv) {
+    if (typeof showFloatingToast === 'function') showFloatingToast("Invoice not found to repeat", "error");
+    return;
+  }
+  const details = inv.details || inv;
+  currentInvoice = JSON.parse(JSON.stringify(details));
+  
+  // Clone as brand-new invoice with today's date
+  currentInvoice.id = null;
+  currentInvoice.isEditing = false;
+  currentInvoice.qrToken = "";
+  
+  const today = new Date().toISOString().split("T")[0];
+  currentInvoice.invoiceDate = today;
+  currentInvoice.paymentDate = today;
+
+  // Defaults
+  if (!currentInvoice.buyer) {
+    currentInvoice.buyer = { name: "", address: "", gstin: "", phone: "", state: "Andhra Pradesh", stateCode: "37" };
+  }
+  if (!currentInvoice.consignee) {
+    currentInvoice.consignee = { name: "", address: "", gstin: "", state: "Andhra Pradesh", stateCode: "37" };
+  }
+  if (!Array.isArray(currentInvoice.items)) {
+    currentInvoice.items = [];
+  }
+
+  switchTab("billing");
+
+  // Next sequential invoice number
+  if (typeof autoSuggestInvoiceNo === 'function') {
+    autoSuggestInvoiceNo();
+  }
+
+  if (elements.billInvoiceType) elements.billInvoiceType.value = currentInvoice.invoiceType || "Bill of Supply";
+  if (elements.billHeaderLogo) elements.billHeaderLogo.value = currentInvoice.headerLogo || "ganesha";
+  if (elements.billInvoiceDate) elements.billInvoiceDate.value = today;
+  if (elements.billBuyerOrderNo) elements.billBuyerOrderNo.value = "";
+  if (elements.billBuyerOrderDate) elements.billBuyerOrderDate.value = today;
+  if (elements.billTransportMode) elements.billTransportMode.value = currentInvoice.transportMode || "";
+  if (elements.billDestination) elements.billDestination.value = currentInvoice.destination || "Andhra Pradesh";
+  if (elements.billSupplyStateCode) elements.billSupplyStateCode.value = currentInvoice.supplyStateCode || "37";
+
+  if (elements.billBuyerName) elements.billBuyerName.value = currentInvoice.buyer.name || "";
+  if (elements.billBuyerAddress) elements.billBuyerAddress.value = currentInvoice.buyer.address || "";
+  if (elements.billBuyerGstin) elements.billBuyerGstin.value = currentInvoice.buyer.gstin || "";
+  if (elements.billBuyerPhone) elements.billBuyerPhone.value = currentInvoice.buyer.phone || "";
+  if (elements.billBuyerState) elements.billBuyerState.value = currentInvoice.buyer.state || "Andhra Pradesh";
+  if (elements.billBuyerStateCode) elements.billBuyerStateCode.value = currentInvoice.buyer.stateCode || "37";
+
+  if (elements.billConsigneeName) elements.billConsigneeName.value = currentInvoice.consignee.name || "";
+  if (elements.billConsigneeAddress) elements.billConsigneeAddress.value = currentInvoice.consignee.address || "";
+  if (elements.billConsigneeGstin) elements.billConsigneeGstin.value = currentInvoice.consignee.gstin || "";
+  if (elements.billConsigneePhone) elements.billConsigneePhone.value = currentInvoice.consignee.phone || "";
+  if (elements.billConsigneeState) elements.billConsigneeState.value = currentInvoice.consignee.state || "Andhra Pradesh";
+  if (elements.billConsigneeStateCode) elements.billConsigneeStateCode.value = currentInvoice.consignee.stateCode || "37";
+
+  if (elements.billPaymentStatus) elements.billPaymentStatus.value = currentInvoice.paymentStatus || "Paid";
+  if (elements.billPaymentMode) elements.billPaymentMode.value = currentInvoice.paymentMode || "UPI / QR";
+  if (elements.billPaidAmount) elements.billPaidAmount.value = currentInvoice.paidAmount !== undefined ? currentInvoice.paidAmount : (currentInvoice.total || 0);
+  if (elements.billBalancePaid) elements.billBalancePaid.value = 0;
+  if (elements.billPaymentDate) elements.billPaymentDate.value = today;
+
+  if (typeof handlePaymentStatusChange === 'function') handlePaymentStatusChange();
+  if (typeof calculateSummaryAndTable === 'function') calculateSummaryAndTable();
+
+  const custDisplay = currentInvoice.buyer?.name || 'Customer';
+  if (typeof showFloatingToast === 'function') {
+    showFloatingToast(`🔁 Cloned Bill for ${custDisplay}! Ready to save or edit.`, 3500);
+  }
+  if (typeof window.playAudioFeedback === 'function') {
+    window.playAudioFeedback("add");
   }
 };
 

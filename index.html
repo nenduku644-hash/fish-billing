@@ -69,7 +69,7 @@
       } catch (e) {}
     }
     // Build Version Enforcement: Clears stale caches when new build is deployed
-    window.__APP_BUILD_VERSION__ = "v348_tab_isolation_hardened";
+    window.__APP_BUILD_VERSION__ = "v385_trust_shortcuts_speed";
     try {
       const storedBuild = localStorage.getItem("aaryan_app_build_version");
       if (storedBuild !== window.__APP_BUILD_VERSION__) {
@@ -83,7 +83,7 @@
   <link rel="preconnect" href="https://script.google.com" crossorigin>
   <link rel="dns-prefetch" href="https://script.google.com">
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="index.css?v=348_tab_isolation_hardened">
+  <link rel="stylesheet" href="index.css?v=385_trust_shortcuts_speed">
   <script src="invoice_utils_v5.js?v=338_paid_reminder_symbol_fix"></script>
 </head>
 <body>
@@ -238,6 +238,10 @@
             <i class="fa-solid fa-share-nodes" style="color: #0284c7;"></i>
             <span id="data-share-pill-text">Share Data</span>
           </div>
+          <div id="cmd-palette-trigger-pill" class="cmd-palette-pill cursor-pointer" onclick="openCommandPalette()" title="Quick Command Palette & Fast Navigation (Ctrl+K or F2)">
+            <i class="fa-solid fa-terminal" style="color: #0284c7;"></i>
+            <span>Commands <kbd>Ctrl+K</kbd></span>
+          </div>
           <div id="live-audio-fx-pill" class="audio-fx-pill active cursor-pointer" onclick="toggleAudioFeedback()" title="Billing Audio FX (Click to Mute / Unmute)">
             <i class="fa-solid fa-volume-high" id="audio-fx-icon"></i>
             <span id="audio-fx-text">Audio</span>
@@ -276,6 +280,46 @@
             <button class="btn btn-cyan btn-hero" id="dashboard-fit-toggle-btn" onclick="toggleDashboardScreenFit()" title="Toggle View Mode (Dynamic Screen-Fit Active)">
               <i class="fa-solid fa-expand" id="dashboard-fit-icon"></i> <span id="dashboard-fit-label">Fitted View</span>
             </button>
+          </div>
+        </div>
+
+        <!-- Professional Enterprise Trust & Customer Confidence Strip -->
+        <div class="enterprise-trust-strip margin-top-12">
+          <div class="trust-badge-item">
+            <div class="trust-badge-icon gst-badge">
+              <i class="fa-solid fa-shield-check"></i>
+            </div>
+            <div class="trust-badge-content">
+              <span class="trust-title">GST Registered Enterprise</span>
+              <span class="trust-sub">100% Tax Compliant • State Code 37</span>
+            </div>
+          </div>
+          <div class="trust-badge-item">
+            <div class="trust-badge-icon cloud-badge">
+              <i class="fa-solid fa-cloud-bolt"></i>
+            </div>
+            <div class="trust-badge-content">
+              <span class="trust-title">Google Cloud Master DB</span>
+              <span class="trust-sub">Continuous Real-Time Sync &amp; Backup</span>
+            </div>
+          </div>
+          <div class="trust-badge-item">
+            <div class="trust-badge-icon wa-badge">
+              <i class="fa-brands fa-whatsapp"></i>
+            </div>
+            <div class="trust-badge-content">
+              <span class="trust-title">Instant WhatsApp Billing</span>
+              <span class="trust-sub">Direct PDF Transmission to Clients</span>
+            </div>
+          </div>
+          <div class="trust-badge-item">
+            <div class="trust-badge-icon speed-badge">
+              <i class="fa-solid fa-gauge-high"></i>
+            </div>
+            <div class="trust-badge-content">
+              <span class="trust-title">Ultra-Fast 0ms Operations</span>
+              <span class="trust-sub">Pre-warmed Container Architecture</span>
+            </div>
           </div>
         </div>
 
@@ -466,6 +510,84 @@
             </table>
           </div>
         </div>
+
+        <!-- Customer Outstanding & Trust Ledger Card (Transparency & Trust) -->
+        <div class="card-box margin-top-12" id="dashboard-customer-ledger-card">
+          <div class="card-box-header">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <h3><i class="fa-solid fa-book-bookmark text-teal"></i> Customer Outstanding &amp; Trust Ledger</h3>
+              <span class="badge-status badge-paid" id="ledger-trust-badge">Verified Balances</span>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-secondary" onclick="switchTab('parties')" title="Manage all customers and parties">
+                <i class="fa-solid fa-users"></i> All Parties
+              </button>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="dashboard-table">
+              <thead>
+                <tr>
+                  <th>CUSTOMER / BUSINESS</th>
+                  <th style="width: 140px;">WHATSAPP PHONE</th>
+                  <th style="width: 80px; text-align: center;">BILLS</th>
+                  <th style="width: 130px; text-align: right;">TOTAL BILLED</th>
+                  <th style="width: 130px; text-align: right;">COLLECTED</th>
+                  <th style="width: 140px; text-align: right;">OUTSTANDING</th>
+                  <th style="width: 140px; text-align: center;">ACTION</th>
+                </tr>
+              </thead>
+              <tbody id="dashboard-customer-ledger-body">
+                <tr>
+                  <td colspan="7" class="text-center text-muted" style="padding: 24px;">
+                    <i class="fa-solid fa-circle-notch fa-spin"></i> Loading Customer Trust Ledger...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Professional Enterprise Footer -->
+        <footer class="enterprise-dashboard-footer margin-top-12">
+          <div class="footer-top-row">
+            <div class="footer-brand-col">
+              <div class="footer-brand-header">
+                <img src="rallis_logo.png" alt="Rallis India Limited Logo" class="footer-logo">
+                <div>
+                  <h4>AARYAN AQUA NEEDS</h4>
+                  <span>Quality Products for Better Aquaculture</span>
+                </div>
+              </div>
+              <p class="footer-desc">
+                Authorized Supplier &amp; Technical Distributor of Premium Shrimp &amp; Fish Healthcare Formulations, Probiotics, Minerals, Feed Supplements &amp; Feeds.
+              </p>
+            </div>
+            <div class="footer-trust-col">
+              <h5><i class="fa-solid fa-certificate text-emerald"></i> Trust &amp; Security Guarantee</h5>
+              <div class="footer-trust-list">
+                <div class="trust-list-item"><i class="fa-solid fa-shield-halved text-teal"></i> <span>100% Tax Compliant GST Invoicing</span></div>
+                <div class="trust-list-item"><i class="fa-solid fa-lock text-teal"></i> <span>End-to-End Google Cloud Encrypted</span></div>
+                <div class="trust-list-item"><i class="fa-solid fa-bolt text-amber"></i> <span>Instant WhatsApp Automated Delivery</span></div>
+              </div>
+            </div>
+            <div class="footer-contact-col">
+              <h5><i class="fa-solid fa-headset text-cyan"></i> Help Desk &amp; Quick Action</h5>
+              <div class="footer-quick-btns">
+                <a href="https://wa.me/918367047947" target="_blank" class="footer-btn wa-btn">
+                  <i class="fa-brands fa-whatsapp"></i> Chat Support (+91 8367047947)
+                </a>
+                <button type="button" class="footer-btn shortcuts-btn" onclick="openCommandPalette()">
+                  <i class="fa-solid fa-terminal"></i> Command Palette <span class="kbd-pill">Ctrl+K</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="footer-bottom-row">
+            <span>&copy; 2026 Aaryan Aqua Needs &bull; All Rights Reserved.</span>
+            <span>Cloud Master Active &bull; Powered by Google Cloud Platform</span>
+          </div>
+        </footer>
       </section>
 
       <!-- VIEW: GST BILLING -->
@@ -648,6 +770,17 @@
               <datalist id="customer-names-datalist">
                 <!-- Dynamically populated from partiesDb & past invoices -->
               </datalist>
+            </div>
+
+            <!-- Frequent Products Quick-Add Favorites Bar (Speed & 1-Tap Convenience) -->
+            <div class="frequent-products-bar margin-top-12" id="frequent-products-bar">
+              <div class="frequent-bar-header">
+                <span class="frequent-title"><i class="fa-solid fa-bolt text-amber"></i> Quick Add Favorites:</span>
+                <span class="frequent-hint">1-tap to add product to bill</span>
+              </div>
+              <div class="frequent-products-chips" id="frequent-products-chips">
+                <!-- Dynamically populated via renderFrequentProductsBar() -->
+              </div>
             </div>
 
             <!-- Section 4: Product Insertion Row (Ultra-Premium SaaS Combobox & Steppers) -->
@@ -3679,6 +3812,18 @@
             <div class="shortcut-keys"><kbd>Alt</kbd> + <kbd>M</kbd></div>
           </div>
           <div class="shortcut-row">
+            <span class="shortcut-label">Command Palette (Search Any)</span>
+            <div class="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>K</kbd> <em>or</em> <kbd>F2</kbd></div>
+          </div>
+          <div class="shortcut-row">
+            <span class="shortcut-label">New GST Bill</span>
+            <div class="shortcut-keys"><kbd>Alt</kbd> + <kbd>N</kbd></div>
+          </div>
+          <div class="shortcut-row">
+            <span class="shortcut-label">Jump to Dashboard / History / Products</span>
+            <div class="shortcut-keys"><kbd>Alt</kbd> + <kbd>D</kbd> / <kbd>H</kbd> / <kbd>P</kbd></div>
+          </div>
+          <div class="shortcut-row">
             <span class="shortcut-label">Close Popovers / Modals</span>
             <div class="shortcut-keys"><kbd>Esc</kbd></div>
           </div>
@@ -3687,6 +3832,25 @@
       <div class="modal-footer" style="padding: 12px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
         <span style="font-size: 11px; color: #64748b;"><i class="fa-solid fa-circle-info text-teal"></i> Works instantly across billing view</span>
         <button type="button" class="btn btn-secondary" onclick="closeKeyboardShortcutsModal()" style="padding: 6px 16px; font-size: 12.5px; cursor: pointer;">Got It</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- GLOBAL COMMAND PALETTE MODAL (Ultra-Fast Navigation & Instant Actions) -->
+  <div id="global-command-palette-modal" class="cmd-palette-overlay hidden" onclick="if(event.target === this) closeCommandPalette();">
+    <div class="cmd-palette-card" onclick="event.stopPropagation();">
+      <div class="cmd-palette-search-wrapper">
+        <i class="fa-solid fa-terminal cmd-palette-icon"></i>
+        <input type="text" id="cmd-palette-input" class="cmd-palette-input" placeholder="Type a command, customer, product, or invoice... (e.g. New Bill, Devi, Feed)" autocomplete="off" spellcheck="false">
+        <kbd class="cmd-palette-esc-hint" onclick="closeCommandPalette()">ESC</kbd>
+      </div>
+      <div class="cmd-palette-results" id="cmd-palette-results">
+        <!-- Results dynamically populated via renderCommandPalette() -->
+      </div>
+      <div class="cmd-palette-footer">
+        <span><kbd>&uarr;</kbd> <kbd>&darr;</kbd> Navigate</span>
+        <span><kbd>&crarr;</kbd> Select</span>
+        <span><kbd>ESC</kbd> Close</span>
       </div>
     </div>
   </div>
@@ -4018,7 +4182,7 @@
     </button>
   </nav>
 
-  <script src="index_v5.js?v=380_turbo_speed_cloud_db"></script>
+  <script src="index_v5.js?v=385_trust_shortcuts_speed"></script>
 </body>
 </html>
 
