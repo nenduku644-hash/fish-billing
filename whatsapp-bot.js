@@ -755,7 +755,16 @@ app.post('/api/sync/push', (req, res) => {
     if (action === 'delete_record') {
       if (payload?.type === 'invoice' || type === 'invoice') {
         let invs = fs.existsSync(invoicesPath) ? JSON.parse(fs.readFileSync(invoicesPath, 'utf8') || '[]') : [];
-        invs = invs.filter(i => i && i.id !== payload.id);
+        const delId = String(payload.id || id || '').trim().toLowerCase();
+        const delNo = String(payload.invoiceNo || '').trim().toLowerCase();
+        invs = invs.filter(i => {
+          if (!i) return false;
+          const iId = String(i.id || '').trim().toLowerCase();
+          const iNo = String(i.invoiceNo || (i.details && i.details.invoiceNo) || '').trim().toLowerCase();
+          if (delId && (iId === delId || iId.replace(/^inv_/, '') === delId.replace(/^inv_/, '') || iNo === delId || iNo.replace(/^#/, '') === delId)) return false;
+          if (delNo && (iNo === delNo || iNo.replace(/^#/, '') === delNo.replace(/^#/, ''))) return false;
+          return true;
+        });
         fs.writeFileSync(invoicesPath, JSON.stringify(invs, null, 2), 'utf8');
       } else if (payload?.type === 'product' || type === 'product') {
         let prods = fs.existsSync(productsPath) ? JSON.parse(fs.readFileSync(productsPath, 'utf8') || '[]') : [];

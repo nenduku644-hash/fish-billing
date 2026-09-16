@@ -17,7 +17,11 @@ const ALLOWED_UI_SESSION_KEYS = new Set([
   "aaryan_dashboard_view_mode",
   "remember_me",
   "saved_username",
-  "saved_password"
+  "saved_password",
+  "cancelled_invoices",
+  "deleted_invoice_ids",
+  "aaryan_app_build_version",
+  "database_history_cleared_at"
 ]);
 
 (function purgeAndLockLocalCache() {
@@ -106,6 +110,19 @@ globalSettings = {};
 
       const updated = [entry, ...cancelled.filter(c => c && c.id !== id && (!token || c.token !== token))].slice(0, 300);
       localStorage.setItem("cancelled_invoices", JSON.stringify(updated));
+
+      if (typeof broadcastInterTabEvent === 'function') {
+        broadcastInterTabEvent('invoice_cancelled', { cancelledRecord: entry });
+      }
+      if (typeof realtimeMeshClient !== 'undefined' && realtimeMeshClient && realtimeMeshClient.connected) {
+        try {
+          realtimeMeshClient.publish('aaryan_aqua_gst_billing_2026/mesh_sync', JSON.stringify({
+            type: 'invoice_cancelled',
+            cancelledRecord: entry,
+            senderId: typeof MY_SYNC_CLIENT_ID !== 'undefined' ? MY_SYNC_CLIENT_ID : 'peer'
+          }), { qos: 0 });
+        } catch (me) {}
+      }
 
       if (typeof pushDirectToGoogleDatabase === 'function') {
         pushDirectToGoogleDatabase("archive_cancelled_invoice", { cancelledRecord: entry });
@@ -766,6 +783,13 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
         if (!curTombstones.includes(al)) curTombstones.push(al);
       });
       try { localStorage.setItem("deleted_invoice_ids", JSON.stringify(curTombstones)); } catch(e){}
+      if (msg.cancelledRecord) {
+        try {
+          const canc = JSON.parse(localStorage.getItem("cancelled_invoices") || "[]");
+          const updated = [msg.cancelledRecord, ...canc.filter(c => c && c.id !== msg.cancelledRecord.id)].slice(0, 300);
+          localStorage.setItem("cancelled_invoices", JSON.stringify(updated));
+        } catch(e){}
+      }
 
       invoicesDb = window.filterOutDeletedInvoices(invoicesDb);
       try { localStorage.setItem("invoices", JSON.stringify(invoicesDb)); } catch (e) {}
@@ -5478,7 +5502,6 @@ window.processAndRouteDecodedQr = function(rawCode, source = 'upload') {
   // 1. Invoice Verification QR or Raw Invoice ID
   if (clean.includes("verify_invoice=") || clean.includes("/?verify_invoice=") || clean.toLowerCase().startsWith("inv_") || clean.toLowerCase().includes("id=inv_")) {
     window.closeBarcodeScannerModal();
-    window.playScannerBeep();
     let invNo = clean;
     try {
       if (clean.includes("verify_invoice=")) {
@@ -5491,9 +5514,6 @@ window.processAndRouteDecodedQr = function(rawCode, source = 'upload') {
 
     if (typeof openInvoiceVerificationModal === "function") {
       openInvoiceVerificationModal(invNo, clean);
-      if (typeof showFloatingToast === 'function') {
-        showFloatingToast(`🧾 Invoice ${invNo.startsWith('inv_') ? invNo : '#' + invNo} loaded!`, "success", 4000);
-      }
     }
     return;
   }
@@ -10055,6 +10075,15 @@ window.deleteSavedInvoice = function(identifier) {
 
     // 3. Purge immediately from invoicesDb using the central filter
     invoicesDb = window.filterOutDeletedInvoices(invoicesDb);
+    invoicesDb = invoicesDb.filter(i => {
+      if (!i) return false;
+      const iId = String(i.id || (i.details && i.details.id) || "").trim().toLowerCase();
+      const iNo = String(i.invoiceNo || (i.details && i.details.invoiceNo) || "").trim().toLowerCase();
+      if (invId && (iId === invId.toLowerCase() || iId.replace(/^inv_/, '') === invId.toLowerCase().replace(/^inv_/, ''))) return false;
+      if (invNo && (iNo === invNo.toLowerCase() || iNo.replace(/^#/, '') === invNo.toLowerCase().replace(/^#/, ''))) return false;
+      return true;
+    });
+    window.invoicesDb = invoicesDb;
     try {
       localStorage.setItem("invoices", JSON.stringify(invoicesDb));
     } catch (e) {}
@@ -10068,13 +10097,39 @@ window.deleteSavedInvoice = function(identifier) {
 
     // 5. Direct cross-browser & inter-tab broadcast (<30ms)
     window.lastSyncETag = null;
+    const cancEntry = {
+      id: invId,
+      token: inv ? (inv.qrToken || (inv.details && inv.details.qrToken) || '') : '',
+      invoiceNo: invNo,
+      customerName: inv ? (inv.customerName || (inv.details && (inv.details.consignee?.name || inv.details.buyer?.name)) || 'Customer') : 'Customer',
+      total: inv ? (inv.total || (inv.details && inv.details.total) || 0) : 0,
+      cancelledAt: new Date().toISOString(),
+      reason: 'Deleted by user from Invoice History',
+      status: 'CANCELLED'
+    };
+
     broadcastInterTabEvent('record_deleted', {
       recordType: 'invoice',
       id: invId,
       invoiceNo: invNo,
       aliases: aliases,
-      products: productsDb
+      products: productsDb,
+      cancelledRecord: cancEntry
     });
+
+    if (typeof realtimeMeshClient !== 'undefined' && realtimeMeshClient && realtimeMeshClient.connected) {
+      try {
+        realtimeMeshClient.publish(SYNC_MESH_TOPIC, JSON.stringify({
+          type: 'record_deleted',
+          recordType: 'invoice',
+          id: invId,
+          invoiceNo: invNo,
+          aliases: aliases,
+          cancelledRecord: cancEntry,
+          senderId: typeof MY_SYNC_CLIENT_ID !== 'undefined' ? MY_SYNC_CLIENT_ID : 'peer'
+        }), { qos: 0 });
+      } catch (me) {}
+    }
 
     // 6. Push deletion to Google Cloud with candidate IDs so it matches Column 1 or JSON
     aliases.slice(0, 4).forEach(alias => {
@@ -14214,11 +14269,20 @@ window.openInvoiceVerificationModal = function(invoiceNo, rawUrl = "") {
     const custEl = document.getElementById("verify-cancel-customer");
     if (custEl) custEl.textContent = canc.customerName || qCust || "Customer";
     const totEl = document.getElementById("verify-cancel-total");
-    if (totEl) totEl.textContent = formatCurrency(canc.total !== undefined ? canc.total : qTot);
+    if (totEl) {
+      const rawTot = canc.total !== undefined ? canc.total : qTot;
+      totEl.textContent = String(formatCurrency(rawTot)).replace(/^[₹\s]+/, '').trim();
+    }
     const reasonEl = document.getElementById("verify-cancel-reason");
     if (reasonEl) {
       const delDateStr = canc.cancelledAt ? new Date(canc.cancelledAt).toLocaleDateString("en-IN") : "recent date";
-      reasonEl.textContent = canc.reason || `Cancelled & deleted from records (${delDateStr})`;
+      reasonEl.textContent = canc.reason || `Cancelled & deleted from company records (${delDateStr}). This QR code is inactive.`;
+    }
+
+    if (typeof playAudioFeedback === 'function') playAudioFeedback('warn');
+    else if (typeof playScannerBeep === 'function') playScannerBeep();
+    if (typeof showFloatingToast === 'function') {
+      showFloatingToast(`⚠️ Invoice #${canc.invoiceNo || cleanNo || 'N/A'} is DELETED / VOID! QR code is inactive.`, "error", 5000);
     }
 
     modal.classList.remove("hidden");
@@ -14236,8 +14300,14 @@ window.openInvoiceVerificationModal = function(invoiceNo, rawUrl = "") {
       badgeIcon.style.background = "rgba(239, 68, 68, 0.3)";
     }
     const invCodeEl = document.getElementById("verify-invalid-code");
-    if (invCodeEl) invCodeEl.textContent = cleanNo || qId || "N/A";
+    if (invCodeEl) invCodeEl.textContent = cleanNo ? `#${cleanNo}` : (qId || "N/A");
     if (printBtn) printBtn.style.display = "none";
+
+    if (typeof playAudioFeedback === 'function') playAudioFeedback('warn');
+    else if (typeof playScannerBeep === 'function') playScannerBeep();
+    if (typeof showFloatingToast === 'function') {
+      showFloatingToast(`❌ Invoice record not found! QR code is invalid.`, "error", 5000);
+    }
 
     modal.classList.remove("hidden");
   };
@@ -14255,13 +14325,37 @@ window.openInvoiceVerificationModal = function(invoiceNo, rawUrl = "") {
     cancMatch = cancelledInvoices.find(c => c && String(c.token).trim().toLowerCase() === qToken.toLowerCase());
   }
   if (!cancMatch && cleanNo) {
+    const cleanNoLower = cleanNo.toLowerCase().replace(/^#/, '');
     cancMatch = cancelledInvoices.find(c => c && (
-      String(c.invoiceNo || '').trim().toLowerCase() === cleanNo.toLowerCase() ||
-      String(c.id || '').trim().toLowerCase() === cleanNo.toLowerCase()
+      String(c.invoiceNo || '').trim().toLowerCase().replace(/^#/, '') === cleanNoLower ||
+      String(c.id || '').trim().toLowerCase().replace(/^inv_/, '') === cleanNoLower
     ));
   }
 
-  // 2. Search in active invoicesDb
+  // 2. Check Deleted Tombstones
+  const tombstones = typeof window.getDeletedInvoiceTombstones === "function" ? window.getDeletedInvoiceTombstones() : [];
+  const cleanLower = cleanNo.toLowerCase().replace(/^#/, '');
+  const isTombstone = tombstones.some(t => {
+    const tClean = String(t).toLowerCase().replace(/^#/, '').replace(/^inv_/, '');
+    return tClean === cleanLower || (qId && t.toLowerCase() === qId.toLowerCase());
+  });
+
+  if (cancMatch) {
+    return renderCancelledState(cancMatch);
+  }
+
+  if (isTombstone) {
+    return renderCancelledState({
+      id: qId,
+      token: qToken,
+      invoiceNo: cleanNo,
+      customerName: qCust || "Customer",
+      total: qTot,
+      reason: "Officially deleted from company registry. This QR code is inactive."
+    });
+  }
+
+  // 3. Search in active invoicesDb
   let activeInv = null;
   const lookupId = (qId || (cleanNo.toLowerCase().startsWith("inv_") ? cleanNo : "")).toLowerCase();
   if (lookupId) {
@@ -14292,7 +14386,7 @@ window.openInvoiceVerificationModal = function(invoiceNo, rawUrl = "") {
     return false;
   });
 
-  // Collision Detection: If active invoice exists with this number, but scanned QR has a different explicit ID or different customer/amount:
+  // Collision Detection: If active invoice exists with this number, but scanned QR has a different explicit ID or different token or different customer/amount:
   if (activeByNo && (qId || qToken || (qCust && qCust !== "Valued Customer"))) {
     const activeId = String(activeByNo.id || "").trim().toLowerCase();
     const activeToken = String(activeByNo.qrToken || (activeByNo.details && activeByNo.details.qrToken) || "").trim().toLowerCase();
@@ -14311,75 +14405,23 @@ window.openInvoiceVerificationModal = function(invoiceNo, rawUrl = "") {
         invoiceNo: cleanNo,
         customerName: qCust || "Original Customer",
         total: qTot,
-        reason: `Superseded: An invoice #${cleanNo} was re-issued. This earlier version is void.`
+        reason: `Superseded: An invoice #${cleanNo} was re-issued. This earlier version is deleted and void.`
       });
     }
-  }
-
-  if (cancMatch) {
-    return renderCancelledState(cancMatch);
   }
 
   let inv = activeInv || activeByNo;
 
-  // Check tombstones if not found in active DB
+  // 4. Handle Case where Invoice is Not Found in Local In-Memory DB
   if (!inv) {
-    const tombstones = typeof window.getDeletedInvoiceTombstones === "function" ? window.getDeletedInvoiceTombstones() : [];
-    const cleanLower = cleanNo.toLowerCase().replace(/^#/, '');
-    const isTombstone = tombstones.some(t => {
-      const tClean = String(t).toLowerCase().replace(/^#/, '').replace(/^inv_/, '');
-      return tClean === cleanLower || (qId && t === qId.toLowerCase());
-    });
-    if (isTombstone) {
-      return renderCancelledState({
-        id: qId,
-        token: qToken,
-        invoiceNo: cleanNo,
-        customerName: qCust || "Customer",
-        total: qTot,
-        reason: "Officially deleted from company registry"
-      });
-    }
-  }
-
-  // 3. Fallback: Parse verification details directly from URL params if guest customer on mobile
-  if (!inv && cleanNo && (urlParams.get("verify_invoice") || urlParams.get("cust") || urlParams.get("tot"))) {
-    const cust = urlParams.get("cust") || "Valued Customer";
-    const phone = urlParams.get("ph") || "";
-    const tot = Number(urlParams.get("tot") || 0);
-    const paid = Number(urlParams.get("paid") || 0);
-    const bal = Number(urlParams.get("bal") || Math.max(0, tot - paid));
-    const dt = urlParams.get("dt") || new Date().toISOString();
-
-    if (tot > 0 || (cust && cust !== "Valued Customer")) {
-      inv = {
-        invoiceNo: cleanNo,
-        id: qId || `inv_guest_${cleanNo}`,
-        buyerName: cust,
-        buyerPhone: phone,
-        total: tot,
-        paidAmount: paid,
-        balanceDue: bal,
-        invoiceDate: dt,
-        details: {
-          invoiceNo: cleanNo,
-          invoiceDate: dt,
-          total: tot,
-          paidAmount: paid,
-          balanceDue: bal,
-          buyer: { name: cust, phone: phone }
-        }
-      };
-    }
-  }
-
-  if (!inv) {
-    // Before giving up, if we have Google Script URL configured, trigger an active cloud fetch to see if this invoice exists in the master database
-    if (typeof GOOGLE_SCRIPT_URL !== "undefined" && GOOGLE_SCRIPT_URL && !window._isVerifyingCloudSync) {
+    // If invoicesDb is not loaded yet (or empty) and we have a cloud master database configured:
+    if (typeof GOOGLE_SCRIPT_URL !== "undefined" && GOOGLE_SCRIPT_URL && !window._isVerifyingCloudSync && (!invoicesDb || invoicesDb.length === 0)) {
       window._isVerifyingCloudSync = true;
-      if (subtitleEl) subtitleEl.textContent = "Querying Cloud Master Database...";
+      if (subtitleEl) subtitleEl.textContent = "Verifying against Company Database...";
       if (header) header.style.background = "linear-gradient(135deg, #0284c7, #0369a1)";
       if (stateInvalid) stateInvalid.style.display = "none";
+      if (stateCancelled) stateCancelled.style.display = "none";
+      if (stateValid) stateValid.style.display = "none";
       if (modal) modal.classList.remove("hidden");
 
       fetch(`${GOOGLE_SCRIPT_URL}?action=sync&_t=${Date.now()}`)
@@ -14388,10 +14430,19 @@ window.openInvoiceVerificationModal = function(invoiceNo, rawUrl = "") {
           window._isVerifyingCloudSync = false;
           if (data && data.invoices && Array.isArray(data.invoices)) {
             invoicesDb = data.invoices;
+            // Retry verification with fresh authoritative database
             window.openInvoiceVerificationModal(cleanNo, rawUrl);
             return;
           }
-          renderInvalidState();
+          // Cloud database returned, but invoice is NOT in it (was deleted or never existed)
+          renderCancelledState({
+            id: qId,
+            token: qToken,
+            invoiceNo: cleanNo,
+            customerName: qCust || "Customer",
+            total: qTot,
+            reason: "Record Deleted: This invoice was officially deleted from company registry. This QR code is inactive."
+          });
         })
         .catch(err => {
           window._isVerifyingCloudSync = false;
@@ -14401,14 +14452,40 @@ window.openInvoiceVerificationModal = function(invoiceNo, rawUrl = "") {
       return;
     }
 
-    renderInvalidState();
-    return;
+    // If invoicesDb is already loaded and invoice is NOT present, it was DELETED!
+    return renderCancelledState({
+      id: qId,
+      token: qToken,
+      invoiceNo: cleanNo,
+      customerName: qCust || "Customer",
+      total: qTot,
+      reason: "Record Deleted: This invoice was officially deleted from company registry. This QR code is inactive."
+    });
   }
 
-  // VALID INVOICE STATE
+  // 5. Check if the found invoice has CANCELLED or VOID status
+  const invStatus = String(inv.status || (inv.details && inv.details.status) || (inv.details && inv.details.paymentStatus) || '').toUpperCase();
+  if (invStatus === 'CANCELLED' || invStatus === 'VOID') {
+    return renderCancelledState({
+      id: inv.id,
+      token: inv.qrToken || qToken,
+      invoiceNo: inv.invoiceNo || cleanNo,
+      customerName: inv.customerName || (inv.details && inv.details.buyer?.name) || qCust,
+      total: inv.total || (inv.details && inv.details.total) || qTot,
+      reason: "Invoice is marked Cancelled / Void in company records. This QR code is inactive."
+    });
+  }
+
+  // 6. VALID INVOICE STATE (Authoritative Confirmation)
   if (stateCancelled) stateCancelled.style.display = "none";
   if (stateInvalid) stateInvalid.style.display = "none";
   if (stateValid) stateValid.style.display = "block";
+  if (printBtn) printBtn.style.display = "inline-flex";
+
+  if (typeof playScannerBeep === 'function') playScannerBeep();
+  if (typeof showFloatingToast === 'function') {
+    showFloatingToast(`🧾 Invoice #${inv.invoiceNo || cleanNo} verified from database!`, "success", 4000);
+  }
 
   const invDetails = inv.details || inv;
   window.currentVerifiedInvoiceId = inv.id || invDetails.id || null;
