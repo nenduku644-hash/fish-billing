@@ -6403,12 +6403,8 @@ window.saveCurrentInvoiceRecord = async function(actionType = 'save_only', btnEl
       }
     } else {
       // save_only ("Generate & Save Invoice"):
-      // Fully automated: saves invoice, compiles PDF, syncs Google Drive & auto-dispatches via WhatsApp bot silently
+      // Fully automated: saves invoice, compiles PDF, syncs Google Drive & auto-dispatches via WhatsApp bot silently in background
       showFloatingToast(`✅ Invoice #${invoiceRecord.invoiceNo} successfully created & saved!`);
-      const isBotReady = whatsappBotStatus && (whatsappBotStatus.isReady || whatsappBotStatus.status === 'CONNECTED') && (typeof window.isLiveBotConnected === 'function' ? window.isLiveBotConnected() : true);
-      if (globalSettings.whatsappAutoSend !== false && isBotReady) {
-        shareInvoicePdfNative(invoiceRecord.details, null, false);
-      }
       if (typeof openInvoiceSuccessModal === 'function') {
         openInvoiceSuccessModal(invoiceRecord);
         resetBillingForm();
@@ -7545,11 +7541,12 @@ let whatsappBotStatus = isCachedFresh
 window.isLiveBotConnected = function() {
   if (!whatsappBotStatus) return false;
   if (!whatsappBotStatus.isReady && whatsappBotStatus.status !== 'CONNECTED') return false;
-  if (window.location.hostname === 'localhost' && window.location.port === '3001') return true;
+  const isLocal = (typeof isLocalCompanionAvailable === 'function' && isLocalCompanionAvailable()) || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.port === '3001';
+  if (isLocal) return true;
   const hb = Number(whatsappBotStatus.lastHeartbeat || whatsappBotStatus.timestamp || 0);
-  if (!hb) return false;
+  if (!hb) return true;
   const age = Date.now() - hb;
-  return age < 35000; // Must have heartbeat within last 35 seconds
+  return age < 60000; // Must have heartbeat within last 60 seconds
 };
 
 function saveWaStatusCache(data) {
@@ -7560,14 +7557,14 @@ function saveWaStatusCache(data) {
   }
 }
 
-// Proactive Heartbeat Watchdog: Demote stale WhatsApp status if heartbeat stopped for > 30s
+// Proactive Heartbeat Watchdog: Demote stale WhatsApp status if heartbeat stopped for > 60s
 setInterval(() => {
   if (whatsappBotStatus && whatsappBotStatus.status === 'CONNECTED' && typeof window.isLiveBotConnected === 'function' && !window.isLiveBotConnected()) {
     whatsappBotStatus.status = 'DISCONNECTED';
     whatsappBotStatus.isReady = false;
     updateWhatsAppBotPillUI(whatsappBotStatus);
   }
-}, 8000);
+}, 15000);
 
 let whatsappPollInterval = null;
 let whatsappEventSource = null;
@@ -8779,11 +8776,12 @@ async function dispatchWhatsAppBotInvoice({ phone, text, filename, pdfBase64 }) 
     ? text
     : '';
 
-  // 1. Try local HTTP POST if running locally on port 3001
-  if (window.location.port === '3001' || window.location.hostname === 'localhost') {
+  // 1. Try local HTTP POST if running locally or companion available
+  const isLocal = (typeof isLocalCompanionAvailable === 'function' && isLocalCompanionAvailable()) || window.location.port === '3001' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  if (isLocal) {
     try {
       const controller = new AbortController();
-      const tId = setTimeout(() => controller.abort(), 3500);
+      const tId = setTimeout(() => controller.abort(), 45000); // 45 seconds for full PDF generation + WhatsApp Web upload
       const res = await fetch(getWhatsAppApiEndpoint('/api/whatsapp/send-invoice'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -8793,14 +8791,17 @@ async function dispatchWhatsAppBotInvoice({ phone, text, filename, pdfBase64 }) 
       clearTimeout(tId);
       if (res.ok) {
         const data = await res.json();
-        if (data && data.ok) return true;
+        if (data && data.ok) {
+          console.log(`✅ WhatsApp Invoice delivered silently via local bot to +${cleanPhone}!`);
+          return true;
+        }
       }
     } catch (e) {
-      console.log("Local HTTP POST unavailable. Relaying via MQTT Mesh...");
+      console.log("Local HTTP POST note. Falling back to MQTT Mesh if available...", e.message || e);
     }
   }
 
-  // 2. Only attempt MQTT relay if bot is confirmed genuinely live (<35s heartbeat)
+  // 2. Only attempt MQTT relay if bot is confirmed genuinely live (<60s heartbeat)
   if (typeof window.isLiveBotConnected === 'function' && !window.isLiveBotConnected()) {
     console.log("ℹ️ WhatsApp Bot is not live (no recent heartbeat). Skipping MQTT bot dispatch.");
     return false;
@@ -8812,7 +8813,7 @@ async function dispatchWhatsAppBotInvoice({ phone, text, filename, pdfBase64 }) 
       const cmdId = 'inv_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
       const safePdfBase64 = pdfBase64 ? pdfBase64 : null;
       
-      const ackPromise = waitForMqttBotAck(cmdId, 15000);
+      const ackPromise = waitForMqttBotAck(cmdId, 25000);
 
       realtimeMeshClient.publish('aaryan_aqua_gst_billing_2026/whatsapp_commands', JSON.stringify({
         commandId: cmdId,
@@ -8844,10 +8845,11 @@ async function dispatchWhatsAppBotMessage({ phone, text }) {
   if (!cleanPhone) return false;
 
   // 1. Try local HTTP POST if on localhost / port 3001
-  if (window.location.port === '3001' || window.location.hostname === 'localhost') {
+  const isLocal = (typeof isLocalCompanionAvailable === 'function' && isLocalCompanionAvailable()) || window.location.port === '3001' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  if (isLocal) {
     try {
       const controller = new AbortController();
-      const tId = setTimeout(() => controller.abort(), 3500);
+      const tId = setTimeout(() => controller.abort(), 15000); // 15 seconds
       const res = await fetch(getWhatsAppApiEndpoint('/api/whatsapp/send-message'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -8857,14 +8859,17 @@ async function dispatchWhatsAppBotMessage({ phone, text }) {
       clearTimeout(tId);
       if (res.ok) {
         const data = await res.json();
-        if (data && data.ok) return true;
+        if (data && data.ok) {
+          console.log(`✅ WhatsApp Message delivered silently via local bot to +${cleanPhone}!`);
+          return true;
+        }
       }
     } catch (e) {
-      console.log("Local HTTP POST unavailable. Relaying via MQTT Mesh...");
+      console.log("Local HTTP POST note. Falling back to MQTT Mesh if available...", e.message || e);
     }
   }
 
-  // 2. Only attempt MQTT relay if bot is confirmed genuinely live (<35s heartbeat)
+  // 2. Only attempt MQTT relay if bot is confirmed genuinely live (<60s heartbeat)
   if (typeof window.isLiveBotConnected === 'function' && !window.isLiveBotConnected()) {
     console.log("ℹ️ WhatsApp Bot is not live (no recent heartbeat). Skipping MQTT bot dispatch.");
     return false;
@@ -8955,7 +8960,11 @@ async function autoDispatchInvoiceToWhatsApp(details, textOrBase64 = null, preco
     const dispatchedList = [];
 
     // Prioritize Consignee first, then Receiver
-    for (const rec of recipientsInfo.allRecipients) {
+    const targets = (recipientsInfo.allRecipients && recipientsInfo.allRecipients.length > 0)
+      ? recipientsInfo.allRecipients
+      : [{ clean: formatWhatsAppPhone(recipientsInfo.primaryPhone), label: 'Customer' }];
+
+    for (const rec of targets) {
       if (!rec.clean) continue;
       const ok = await dispatchWhatsAppBotInvoice({
         phone: rec.clean,
@@ -9116,15 +9125,22 @@ window.shareInvoicePdfNative = async function(details, btnEl = null, force1Click
         throw new Error('Failed to dispatch to recipient(s)');
       }
     } catch (fastErr) {
-      console.warn("Background bot dispatch note, falling back to direct WhatsApp:", fastErr);
+      console.warn("Background bot dispatch note:", fastErr);
       if (btnEl && btnEl.tagName) {
         btnEl.innerHTML = origHtml;
         btnEl.disabled = false;
       }
+      showFloatingToast(`⚠️ WhatsApp Bot delivery took too long or was unavailable.`, "warning", 4000);
+      return false; // Crucial: NEVER open WhatsApp Web automatically when bot is active!
     }
   }
 
-  // --- UNIVERSAL 1-CLICK WHATSAPP FALLBACK (Works 100% on PC, Mobile, Web, GitHub Pages) ---
+  // --- UNIVERSAL 1-CLICK WHATSAPP FALLBACK (User-Initiated Click Only) ---
+  // If this was called silently in the background without user clicking a button, NEVER open popups or redirect:
+  if (!btnEl && !force1Click) {
+    return false;
+  }
+
   // A) Immediately download the PDF file to merchant's computer so they can drag into WhatsApp chat if desired
   try {
     if (pdfBlob) {
@@ -9141,19 +9157,16 @@ window.shareInvoicePdfNative = async function(details, btnEl = null, force1Click
     console.warn("Auto PDF download note:", dlErr);
   }
 
-  // B) Open WhatsApp Web / Mobile directly with the full message (INCLUDING the Google Drive PDF link)
+  // B) Open WhatsApp Web only when the user explicitly clicked the share button and bot is not connected
   const waUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(fullShareText)}`;
-  const waWin = window.open(waUrl, '_blank');
-  if (!waWin || waWin.closed || typeof waWin.closed === 'undefined') {
-    try { window.location.href = waUrl; } catch (e) {}
-  }
+  window.open(waUrl, '_blank');
 
   if (btnEl && btnEl.tagName) {
     btnEl.innerHTML = origHtml;
     btnEl.disabled = false;
   }
 
-  showFloatingToast(`📲 WhatsApp opened with PDF link for ${primaryName} (+${cleanPhone})! PDF file also downloaded to your PC.`, "success", 6000);
+  showFloatingToast(`📲 WhatsApp opened for ${primaryName} (+${cleanPhone})!`, "success", 5000);
   return true;
 };
 
@@ -9471,6 +9484,12 @@ window.sendWhatsAppPaymentReminder = async function(id, btnEl = null) {
     } catch (e) {
       console.warn("Payment reminder send error:", e);
     }
+    if (btnEl && btnEl.tagName) {
+      btnEl.innerHTML = origHtml;
+      btnEl.disabled = false;
+    }
+    showFloatingToast(`⚠️ WhatsApp Bot could not deliver reminder.`, "warning", 4000);
+    return false;
   }
 
   if (btnEl && btnEl.tagName) {
@@ -9478,14 +9497,17 @@ window.sendWhatsAppPaymentReminder = async function(id, btnEl = null) {
     btnEl.disabled = false;
   }
 
-  // Seamless 1-Click WhatsApp Direct Fallback:
-  const encodedText = encodeURIComponent(reminderText);
-  const waDirectUrl = `https://wa.me/${cleanPhone}?text=${encodedText}`;
-  window.open(waDirectUrl, '_blank');
-  if (typeof showFloatingToast === 'function') {
-    showFloatingToast(`📲 Opened WhatsApp Direct with reminder & UPI payment link for +${cleanPhone}!`, 4500);
+  // Seamless 1-Click WhatsApp Direct Fallback (ONLY when bot is offline):
+  if (!isBotReady && cleanPhone) {
+    const encodedText = encodeURIComponent(reminderText);
+    const waDirectUrl = `https://wa.me/${cleanPhone}?text=${encodedText}`;
+    window.open(waDirectUrl, '_blank');
+    if (typeof showFloatingToast === 'function') {
+      showFloatingToast(`📲 Opened WhatsApp Direct with reminder & UPI payment link for +${cleanPhone}!`, 4500);
+    }
+    return true;
   }
-  return true;
+  return false;
 };
 
 window.shareInvoiceToWhatsApp = function(id, btnEl = null) {
@@ -11162,9 +11184,11 @@ window.sendPartyPaymentReminderWhatsApp = async function(partyName, phone) {
     } catch (e) {
       console.warn("Party bot reminder notice:", e);
     }
+    showFloatingToast(`⚠️ WhatsApp Bot could not deliver dues reminder.`, "warning", 4000);
+    return false;
   }
 
-  if (cleanPhone) {
+  if (!isBotReady && cleanPhone) {
     const encodedText = encodeURIComponent(text);
     const waDirectUrl = `https://wa.me/${cleanPhone}?text=${encodedText}`;
     window.open(waDirectUrl, '_blank');
