@@ -1195,12 +1195,14 @@ async function pushDirectToGoogleDatabase(action, payload, maxRetries = 2) {
     ...payload
   };
 
+  const bodyStr = JSON.stringify(gasPayload);
+
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const res = await fetch(GOOGLE_SCRIPT_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify(gasPayload),
+        body: bodyStr,
         redirect: "follow",
         keepalive: true
       });
@@ -1222,19 +1224,21 @@ async function pushDirectToGoogleDatabase(action, payload, maxRetries = 2) {
     }
 
     if (attempt < maxRetries) {
-      const backoffMs = Math.pow(2, attempt) * 800 + Math.floor(Math.random() * 500);
+      const backoffMs = Math.pow(2, attempt) * 300 + Math.floor(Math.random() * 200);
       await new Promise(r => setTimeout(r, backoffMs));
     }
   }
 
-  // Fallback / Offline resilience: enqueue in AaryanDB outbox
-  if (window.AaryanDB && typeof window.AaryanDB.enqueueOutbox === "function") {
-    const fallbackType = action === "save_products" ? "product" :
-                         action === "save_parties" ? "party" :
-                         action === "save_invoice" ? "invoice" : "settings";
-    window.AaryanDB.enqueueOutbox(fallbackType, action, payload);
-    window.AaryanDB.drainOutbox();
-  }
+  // Fire-and-forget fallback: use sendBeacon so the write still reaches the server
+  // even if the user navigates away. sendBeacon doesn't return a response.
+  try {
+    if (navigator.sendBeacon) {
+      const blob = new Blob([bodyStr], { type: "text/plain;charset=utf-8" });
+      navigator.sendBeacon(GOOGLE_SCRIPT_URL, blob);
+      console.log("📡 Sent via sendBeacon (fire-and-forget):", action);
+    }
+  } catch (e) {}
+
   return null;
 }
 
@@ -1298,6 +1302,7 @@ function deleteInvoiceFromServer(id, invoiceNo) {
 let activeSyncPromise = null;
 let lastSyncTimeMs = 0;
 let syncBadgeTimer = null;
+let lastSyncDataHash = null; // Used for delta-sync: skip UI rebuild if data unchanged
 
 window.updateCloudSyncBadge = function(status) {
   const badge = document.getElementById("live-cloud-sync-badge");
@@ -1371,6 +1376,19 @@ window.triggerDatabaseSync = async function(forceReload = false) {
   })
   .then((data) => {
     if (!data) return;
+
+    // ★ Fast delta check: skip expensive UI rebuild if data unchanged
+    const quickHash = (data.invoices ? data.invoices.length : 0) + '|' +
+                      (data.products ? data.products.length : 0) + '|' +
+                      (data.parties ? data.parties.length : 0) + '|' +
+                      (data.serverTime || 0);
+    if (quickHash === lastSyncDataHash && !forceReload) {
+      window.lastSyncTimeMs = Date.now();
+      if (typeof window.updateCloudSyncBadge === 'function') window.updateCloudSyncBadge("synced");
+      console.log("⚡ Delta-sync: data unchanged, skipped UI rebuild");
+      return;
+    }
+    lastSyncDataHash = quickHash;
 
     if (typeof window.updateCloudSyncBadge === 'function') {
       window.updateCloudSyncBadge("synced");
@@ -1472,13 +1490,27 @@ try {
   window.triggerDatabaseSync();
 } catch (e) {}
 
-// High-Speed Pre-Warming Engine: Pings Google Apps Script every 3.5 minutes to eliminate cold-start lag
+// High-Speed Pre-Warming Engine: keeps Google Apps Script V8 container permanently hot
 (function startCloudDatabasePrewarming() {
-  setInterval(() => {
+  const pingUrl = `${GOOGLE_SCRIPT_URL}?action=ping`;
+  const doPing = () => {
     if (navigator.onLine) {
-      fetch(`${GOOGLE_SCRIPT_URL}?action=ping`, { mode: 'no-cors', cache: 'no-store' }).catch(() => {});
+      fetch(pingUrl, { mode: 'no-cors', cache: 'no-store', keepalive: true }).catch(() => {});
     }
-  }, 210000); // 3.5 minutes
+  };
+  // Immediate warm-up ping on script load
+  setTimeout(doPing, 100);
+  // Keep-alive ping every 2 minutes to prevent cold starts
+  setInterval(doPing, 120000);
+})();
+
+// Auto-sync heartbeat: refresh data from Google Cloud every 45 seconds
+(function startAutoSyncHeartbeat() {
+  setInterval(() => {
+    if (navigator.onLine && !isSyncing && document.visibilityState === 'visible') {
+      window.triggerDatabaseSync(false);
+    }
+  }, 45000);
 })();
 
 // --- SECURE GOOGLE DRIVE PDF ARCHIVE & CLOUD SYNC ENGINE ---

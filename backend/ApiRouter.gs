@@ -6,6 +6,7 @@
 
 var ALLOWED_ACTIONS = [
   "status",
+  "ping",
   "sync",
   "pull",
   "save_invoice",
@@ -24,6 +25,13 @@ function handleApiGet(e) {
     return ContentService.createTextOutput(JSON.stringify({
       ok: false,
       error: "Unknown or unauthorized action: " + action
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  // 0. Ultra-Fast Ping — keeps V8 container warm, zero sheet access (<50ms)
+  if (action === "ping") {
+    return ContentService.createTextOutput(JSON.stringify({
+      ok: true, pong: true, t: Date.now()
     })).setMimeType(ContentService.MimeType.JSON);
   }
 

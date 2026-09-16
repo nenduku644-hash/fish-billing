@@ -6,12 +6,6 @@
 
 var SPREADSHEET_NAME = "Aaryan_Aqua_Live_Master_Sheet";
 
-function getMasterSpreadsheetId() {
-  var props = PropertiesService.getScriptProperties();
-  return props.getProperty("MASTER_SPREADSHEET_ID");
-}
-var SPREADSHEET_NAME = "Aaryan_Aqua_Live_Master_Sheet";
-
 function getMasterSpreadsheet() {
   var props = PropertiesService.getScriptProperties();
   var ss = null;
