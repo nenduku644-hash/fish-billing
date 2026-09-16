@@ -296,7 +296,7 @@ function initMqttBridge() {
                 console.log(`📄 Sending WhatsApp Invoice & PDF via Cloud Mesh to +${cmd.phone}...`);
                 try {
                   if (cmd.pdfBase64) {
-                    const cleanB64 = cmd.pdfBase64.replace(/^data:application\/pdf;base64,/, '');
+                    const cleanB64 = String(cmd.pdfBase64).replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
                     const media = new MessageMedia('application/pdf', cleanB64, cmd.filename || 'Invoice.pdf');
                     await client.sendMessage(chatId, media, { caption: sanitizeCaption(cmd.text || cmd.caption || ''), sendMediaAsDocument: true });
                     console.log(`📄 WhatsApp Invoice (WITH PDF) delivered to +${cmd.phone}!`);
@@ -391,10 +391,13 @@ function formatPhone(phone) {
 
 function sanitizeCaption(str) {
   if (!str || typeof str !== 'string') return '';
-  const trimmed = str.trim();
+  let trimmed = str.trim();
   // Strip out accidental raw base64 or long payload strings from WhatsApp document caption
-  if (trimmed.startsWith('data:application/pdf') || trimmed.startsWith('data:') || trimmed.startsWith('JVBERi0') || trimmed.length > 2000) {
+  if (trimmed.startsWith('data:') || trimmed.startsWith('JVBERi0')) {
     return '';
+  }
+  if (trimmed.length > 1024) {
+    trimmed = trimmed.substring(0, 1020) + '...';
   }
   return trimmed;
 }
@@ -669,7 +672,7 @@ app.post('/api/whatsapp/send-invoice', async (req, res) => {
 
   try {
     if (pdfBase64) {
-      const cleanB64 = pdfBase64.replace(/^data:application\/pdf;base64,/, '');
+      const cleanB64 = String(pdfBase64).replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
       const media = new MessageMedia('application/pdf', cleanB64, filename || 'Invoice.pdf');
       await client.sendMessage(chatId, media, { caption: sanitizeCaption(text || req.body.caption || ''), sendMediaAsDocument: true });
     } else {

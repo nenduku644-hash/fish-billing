@@ -6391,8 +6391,8 @@ window.saveCurrentInvoiceRecord = async function(actionType = 'save_only', btnEl
       switchTab("history");
       loadInvoicesHistoryTable();
     } else if (actionType === 'share_whatsapp') {
-      showFloatingToast(`✅ Invoice #${invoiceRecord.invoiceNo} saved! Dispatching via WhatsApp Bot...`);
-      shareInvoicePdfNative(invoiceRecord.details, btnEl, false, precomputedBase64);
+      showFloatingToast(`✅ Invoice #${invoiceRecord.invoiceNo} saved! Dispatching via WhatsApp...`);
+      shareInvoicePdfNative(invoiceRecord.details, btnEl, false);
       if (typeof openInvoiceSuccessModal === 'function') {
         openInvoiceSuccessModal(invoiceRecord);
         resetBillingForm();
@@ -6403,10 +6403,11 @@ window.saveCurrentInvoiceRecord = async function(actionType = 'save_only', btnEl
       }
     } else {
       // save_only ("Generate & Save Invoice"):
-      // Fully automated: saves invoice, compiles PDF, syncs Google Drive & auto-dispatches via WhatsApp bot without browser redirect
+      // Fully automated: saves invoice, compiles PDF, syncs Google Drive & auto-dispatches via WhatsApp bot silently
       showFloatingToast(`✅ Invoice #${invoiceRecord.invoiceNo} successfully created & saved!`);
-      if (globalSettings.whatsappAutoSend !== false) {
-        shareInvoicePdfNative(invoiceRecord.details, null, false, precomputedBase64);
+      const isBotReady = whatsappBotStatus && (whatsappBotStatus.isReady || whatsappBotStatus.status === 'CONNECTED') && (typeof window.isLiveBotConnected === 'function' ? window.isLiveBotConnected() : true);
+      if (globalSettings.whatsappAutoSend !== false && isBotReady) {
+        shareInvoicePdfNative(invoiceRecord.details, null, false);
       }
       if (typeof openInvoiceSuccessModal === 'function') {
         openInvoiceSuccessModal(invoiceRecord);
@@ -7409,10 +7410,12 @@ function generateWhatsAppInvoiceMessage(details) {
     msg += `Kindly clear the balance at your earliest convenience. Thank you! 🙏\n`;
   }
 
-  const onlinePdfUrl = details.pdfUrl || details.googleDriveUrl || details.viewUrl;
-  if (onlinePdfUrl && onlinePdfUrl.startsWith('http') && !onlinePdfUrl.includes('localhost')) {
+  const onlinePdfUrl = details.pdfUrl || details.googleDriveUrl || details.viewUrl || details.details?.pdfUrl ||
+    (Array.isArray(invoicesDb) && invoicesDb.find(i => i && (i.id === details.id || String(i.invoiceNo) === String(details.invoiceNo)))?.pdfUrl) ||
+    (Array.isArray(invoicesDb) && invoicesDb.find(i => i && (i.id === details.id || String(i.invoiceNo) === String(details.invoiceNo)))?.details?.pdfUrl);
+  if (onlinePdfUrl && typeof onlinePdfUrl === 'string' && onlinePdfUrl.startsWith('http') && !onlinePdfUrl.includes('localhost')) {
     msg += `-----------------------------------\n`;
-    msg += `📄 *View / Download PDF Invoice:*\n${onlinePdfUrl}\n`;
+    msg += `📥 *OFFICIAL PDF TAX INVOICE:*\n${onlinePdfUrl}\n`;
   }
 
   msg += `-----------------------------------\n`;
@@ -7744,15 +7747,19 @@ function updateWhatsAppBotPillUI(data) {
 
   // 4. WAITING FOR QR SCAN OR PAIRING CODE
   if (data && (data.status === "QR_READY" || data.status === "CODE_READY")) {
+    pill.classList.remove("connected", "dispatching", "initializing", "authenticating", "disconnected");
     pill.classList.add("waiting-qr");
-    if (radarDot) radarDot.style.display = "none";
+    if (radarDot) {
+      radarDot.style.display = "inline-block";
+      radarDot.style.background = "#f59e0b";
+    }
     if (statusIcon) {
       statusIcon.className = "fa-brands fa-whatsapp";
       statusIcon.style.display = "inline-block";
-      statusIcon.style.color = "#16a34a";
+      statusIcon.style.color = "#d97706";
     }
-    statusText.textContent = "WhatsApp";
-    pill.title = "WhatsApp Bot (Click for options)";
+    statusText.textContent = "WhatsApp (Scan QR)";
+    pill.title = "WhatsApp Bot Ready: Click to scan QR code and link automatic background PDF sending";
     return;
   }
 
@@ -8653,14 +8660,22 @@ function formatInvoiceWhatsAppSummary(details) {
     text += `✅ *Payment Status:* FULLY PAID (₹ ${formatCurrency(total)})\n`;
     text += `💳 *Payment Mode:* ${details.paymentMode || 'UPI / Cash'}\n`;
     text += `-----------------------------------\n`;
-    text += `Thank you for your business! 🙏`;
+    text += `Thank you for your business! 🙏\n`;
   } else {
     text += `✅ *Amount Paid:* ₹ ${formatCurrency(paid)}\n`;
     text += `🔴 *PENDING BALANCE DUE:* ₹ ${formatCurrency(balance)}\n`;
     text += `-----------------------------------\n`;
     text += `📲 *Pay Pending Balance via UPI:*\n`;
     text += `UPI ID: *${realUpiId}*\n\n`;
-    text += `Kindly clear the pending balance at your earliest convenience. Thank you! 🙏`;
+    text += `Kindly clear the pending balance at your earliest convenience. Thank you! 🙏\n`;
+  }
+
+  const onlinePdfUrl = details.pdfUrl || details.googleDriveUrl || details.viewUrl || details.details?.pdfUrl ||
+    (Array.isArray(invoicesDb) && invoicesDb.find(i => i && (i.id === details.id || String(i.invoiceNo) === String(details.invoiceNo)))?.pdfUrl) ||
+    (Array.isArray(invoicesDb) && invoicesDb.find(i => i && (i.id === details.id || String(i.invoiceNo) === String(details.invoiceNo)))?.details?.pdfUrl);
+  if (onlinePdfUrl && typeof onlinePdfUrl === 'string' && onlinePdfUrl.startsWith('http') && !onlinePdfUrl.includes('localhost')) {
+    text += `-----------------------------------\n`;
+    text += `📥 *OFFICIAL TAX INVOICE PDF:*\n${onlinePdfUrl}\n`;
   }
   return text;
 }
@@ -8698,22 +8713,30 @@ async function generateInvoicePdfBlob(details) {
     reader.readAsDataURL(blob);
   });
 
-  // Automatically save to local disk & Google Drive backend in background
+  // Automatically upload to Google Drive backend and await fast link generation
+  let uploadedUrl = details.pdfUrl || details.googleDriveUrl || details.viewUrl || null;
   try {
-    uploadInvoicePdfToGoogleDrive(details, pdfBase64).then(pUrl => {
-      if (pUrl) {
-        details.pdfUrl = pUrl;
-        const idx = invoicesDb.findIndex(i => i.id === details.id || i.invoiceNo === details.invoiceNo);
-        if (idx > -1) {
-          invoicesDb[idx].pdfUrl = pUrl;
-          if (invoicesDb[idx].details) invoicesDb[idx].details.pdfUrl = pUrl;
-          localStorage.setItem("invoices", JSON.stringify(invoicesDb));
-        }
+    if (!uploadedUrl) {
+      uploadedUrl = await Promise.race([
+        uploadInvoicePdfToGoogleDrive(details, pdfBase64),
+        new Promise(r => setTimeout(() => r(null), 3800))
+      ]);
+    }
+    if (uploadedUrl) {
+      details.pdfUrl = uploadedUrl;
+      if (details.details) details.details.pdfUrl = uploadedUrl;
+      const idx = Array.isArray(invoicesDb) ? invoicesDb.findIndex(i => i && (i.id === details.id || String(i.invoiceNo) === String(details.invoiceNo))) : -1;
+      if (idx > -1) {
+        invoicesDb[idx].pdfUrl = uploadedUrl;
+        if (invoicesDb[idx].details) invoicesDb[idx].details.pdfUrl = uploadedUrl;
+        try { localStorage.setItem("invoices", JSON.stringify(invoicesDb)); } catch (e) {}
       }
-    }).catch(e => console.warn("Upload PDF background sync note:", e));
-  } catch (e) {}
+    }
+  } catch (e) {
+    console.warn("Upload PDF sync note:", e);
+  }
 
-  return { blob, pdfBase64, filename };
+  return { blob, pdfBase64, filename, pdfUrl: uploadedUrl || details.pdfUrl };
 }
 
 window.waCommandCallbacks = window.waCommandCallbacks || {};
@@ -8888,12 +8911,6 @@ async function autoDispatchInvoiceToWhatsApp(details, textOrBase64 = null, preco
     text = null;
   }
 
-  // Ensure text caption is clean and concise (NEVER raw base64 or technical strings)
-  if (!text || typeof text !== 'string' || text.startsWith('data:') || text.startsWith('JVBERi0')) {
-    const custName = details.consignee?.name || details.buyer?.name || details.customerName || 'Customer';
-    text = `📄 Invoice #${details.invoiceNo} - ${custName}`;
-  }
-
   const recipientsInfo = typeof getInvoiceRecipients === 'function'
     ? getInvoiceRecipients(details)
     : { primaryPhone: getCustomerPhoneNumber(details), consigneeName: details.consignee?.name, buyerName: details.buyer?.name, allRecipients: [] };
@@ -8907,17 +8924,31 @@ async function autoDispatchInvoiceToWhatsApp(details, textOrBase64 = null, preco
   const customerClean = custName.replace(/[^a-zA-Z0-9]/g, '_');
   const filename = `Invoice_${details.invoiceNo}_${customerClean}.pdf`;
 
-  // Check live status if needed
-  let isBotReady = whatsappBotStatus && (whatsappBotStatus.isReady || whatsappBotStatus.status === 'CONNECTED') && (typeof window.isLiveBotConnected === 'function' ? window.isLiveBotConnected() : true);
-
+  // Pre-compile PDF if not yet done so Google Drive URL is ready for WhatsApp
   if (!pdfBase64) {
     try {
       const gen = await generateInvoicePdfBlob(details);
-      pdfBase64 = gen ? gen.pdfBase64 : null;
+      if (gen) {
+        pdfBase64 = gen.pdfBase64;
+        if (gen.pdfUrl && !details.pdfUrl) {
+          details.pdfUrl = gen.pdfUrl;
+          if (details.details) details.details.pdfUrl = gen.pdfUrl;
+        }
+      }
     } catch (err) {
       console.warn("Could not generate PDF for auto dispatch:", err);
     }
   }
+
+  // Ensure text caption is clean and complete (with item details & Google Drive link)
+  if (!text || typeof text !== 'string' || text.startsWith('data:') || text.startsWith('JVBERi0')) {
+    text = typeof generateWhatsAppInvoiceMessage === 'function'
+      ? generateWhatsAppInvoiceMessage(details)
+      : formatInvoiceWhatsAppSummary(details);
+  }
+
+  // Check live status if needed
+  let isBotReady = whatsappBotStatus && (whatsappBotStatus.isReady || whatsappBotStatus.status === 'CONNECTED') && (typeof window.isLiveBotConnected === 'function' ? window.isLiveBotConnected() : true);
 
   if (isBotReady) {
     let anySent = false;
@@ -8999,44 +9030,55 @@ window.shareInvoicePdfNative = async function(details, btnEl = null, force1Click
     }
   }
 
-  const fullShareText = typeof generateWhatsAppInvoiceMessage === 'function'
-    ? generateWhatsAppInvoiceMessage(details)
-    : formatInvoiceWhatsAppSummary(details);
+  let origHtml = "";
+  if (btnEl && btnEl.tagName) {
+    origHtml = btnEl.innerHTML;
+    btnEl.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Preparing PDF...`;
+    btnEl.disabled = true;
+  }
+
+  showFloatingToast(`📄 Preparing official PDF invoice #${details.invoiceNo}...`, "info", 2200);
+
   const custName = details.consignee?.name || details.buyer?.name || details.customerName || 'Customer';
   const customerClean = custName.replace(/[^a-zA-Z0-9]/g, '_');
   const filename = `Invoice_${details.invoiceNo}_${customerClean}.pdf`;
 
-  let origHtml = "";
-  if (btnEl && btnEl.tagName) {
-    origHtml = btnEl.innerHTML;
+  // 1. GUARANTEE PDF & GOOGLE DRIVE LINK ARE GENERATED BEFORE BUILDING WHATSAPP MESSAGE
+  let pdfBase64 = precomputedBase64;
+  let pdfBlob = null;
+  let publicPdfUrl = details.pdfUrl || details.googleDriveUrl || details.viewUrl;
+
+  try {
+    const gen = await generateInvoicePdfBlob(details);
+    if (gen) {
+      pdfBase64 = gen.pdfBase64 || pdfBase64;
+      pdfBlob = gen.blob;
+      if (gen.pdfUrl) {
+        publicPdfUrl = gen.pdfUrl;
+        details.pdfUrl = gen.pdfUrl;
+        if (details.details) details.details.pdfUrl = gen.pdfUrl;
+      }
+    }
+  } catch (pdfErr) {
+    console.warn("PDF compilation note in shareInvoicePdfNative:", pdfErr);
   }
 
-  // Always check live bot status first!
+  // 2. NOW CONSTRUCT THE COMPLETE WHATSAPP MESSAGE (GUARANTEED TO CONTAIN GOOGLE DRIVE PDF LINK)
+  const fullShareText = typeof generateWhatsAppInvoiceMessage === 'function'
+    ? generateWhatsAppInvoiceMessage(details)
+    : formatInvoiceWhatsAppSummary(details);
+
+  // 3. CHECK LIVE BOT STATUS
   let isBotReady = whatsappBotStatus && (whatsappBotStatus.isReady || whatsappBotStatus.status === 'CONNECTED') && (typeof window.isLiveBotConnected === 'function' ? window.isLiveBotConnected() : true);
 
-  // --- AUTOMATED BACKGROUND BOT DISPATCH (SILENT - ZERO BROWSER REDIRECT) ---
+  // --- AUTOMATED BACKGROUND BOT DISPATCH (Direct PDF Document Attachment) ---
   if (isBotReady && cleanPhone && !force1Click) {
     if (btnEl && btnEl.tagName) {
-      btnEl.innerHTML = `<i class="fa-solid fa-file-pdf fa-fade"></i> Generating PDF...`;
-      btnEl.disabled = true;
+      btnEl.innerHTML = `<i class="fa-solid fa-cloud-arrow-up fa-fade"></i> Sending via Bot...`;
     }
-    showFloatingToast(`🤖 Generating & uploading invoice #${details.invoiceNo} silently to +${cleanPhone} via Bot...`, 3000);
+    showFloatingToast(`🤖 Sending invoice #${details.invoiceNo} & PDF document silently via WhatsApp Bot...`, "info", 3000);
 
     try {
-      let pdfBase64 = precomputedBase64;
-      if (!pdfBase64) {
-        try {
-          const gen = await generateInvoicePdfBlob(details);
-          pdfBase64 = gen ? gen.pdfBase64 : null;
-        } catch (e) {
-          console.warn("Could not compile PDF for bot share:", e);
-        }
-      }
-
-      if (btnEl && btnEl.tagName) {
-        btnEl.innerHTML = `<i class="fa-solid fa-cloud-arrow-up fa-fade"></i> Sending via Bot...`;
-      }
-
       // Send to Consignee first, and if Receiver also has a distinct phone, send to Receiver as well!
       const targetsToSend = (recipientsInfo.allRecipients && recipientsInfo.allRecipients.length > 0)
         ? recipientsInfo.allRecipients
@@ -9068,7 +9110,7 @@ window.shareInvoicePdfNative = async function(details, btnEl = null, force1Click
             btnEl.disabled = false;
           }, 2500);
         }
-        showFloatingToast(`🚀 Invoice #${details.invoiceNo} & PDF sent automatically to ${sentLabels.join(" & ")} via WhatsApp Bot!`, 5000);
+        showFloatingToast(`🚀 Invoice #${details.invoiceNo} & PDF sent automatically to ${sentLabels.join(" & ")} via WhatsApp Bot!`, "success", 5000);
         return true;
       } else {
         throw new Error('Failed to dispatch to recipient(s)');
@@ -9082,36 +9124,10 @@ window.shareInvoicePdfNative = async function(details, btnEl = null, force1Click
     }
   }
 
-  // Universal 1-Click WhatsApp Delivery (Works 100% on PC, Mobile, Web, GitHub Pages)
-  const waUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(fullShareText)}`;
-  
-  // Try opening WhatsApp Web / Mobile directly
-  const waWin = window.open(waUrl, '_blank');
-  if (!waWin || waWin.closed || typeof waWin.closed === 'undefined') {
-    try { window.location.href = waUrl; } catch (e) {}
-  }
-
-  showFloatingToast(`📲 WhatsApp opened for ${primaryName} (+${cleanPhone})! Press Enter to send.`, "success", 5000);
-
-  // Background trigger PDF download so merchant can drag into WhatsApp chat if desired
-  setTimeout(async () => {
-    try {
-      populateA4PrintOverlay(details);
-      const element = document.getElementById("print-invoice-wrapper");
-      if (!element || typeof html2pdf === 'undefined') return;
-
-      const opt = {
-        margin: [3, 3, 3, 3],
-        filename: filename,
-        image: { type: 'jpeg', quality: 0.95 },
-        html2canvas: { scale: 1.2, useCORS: true, logging: false },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-      };
-
-      element.style.display = "block";
-      const pdfBlob = await html2pdf().set(opt).from(element).outputPdf('blob');
-      element.style.display = "none";
-
+  // --- UNIVERSAL 1-CLICK WHATSAPP FALLBACK (Works 100% on PC, Mobile, Web, GitHub Pages) ---
+  // A) Immediately download the PDF file to merchant's computer so they can drag into WhatsApp chat if desired
+  try {
+    if (pdfBlob) {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(pdfBlob);
       a.download = filename;
@@ -9119,25 +9135,25 @@ window.shareInvoicePdfNative = async function(details, btnEl = null, force1Click
       a.click();
       setTimeout(() => {
         try { document.body.removeChild(a); } catch (e) {}
-      }, 500);
-
-      // Background upload to Google Drive if server API is reachable
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        try {
-          await uploadInvoicePdfToGoogleDrive(details, reader.result);
-        } catch (e) {}
-      };
-      reader.readAsDataURL(pdfBlob);
-    } catch (bgErr) {
-      console.warn("Background PDF generation note:", bgErr);
+      }, 800);
     }
-  }, 200);
+  } catch (dlErr) {
+    console.warn("Auto PDF download note:", dlErr);
+  }
+
+  // B) Open WhatsApp Web / Mobile directly with the full message (INCLUDING the Google Drive PDF link)
+  const waUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(fullShareText)}`;
+  const waWin = window.open(waUrl, '_blank');
+  if (!waWin || waWin.closed || typeof waWin.closed === 'undefined') {
+    try { window.location.href = waUrl; } catch (e) {}
+  }
 
   if (btnEl && btnEl.tagName) {
     btnEl.innerHTML = origHtml;
     btnEl.disabled = false;
   }
+
+  showFloatingToast(`📲 WhatsApp opened with PDF link for ${primaryName} (+${cleanPhone})! PDF file also downloaded to your PC.`, "success", 6000);
   return true;
 };
 
