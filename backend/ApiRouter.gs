@@ -127,7 +127,13 @@ function handleApiPost(e) {
     if (action === "delete_record") {
       var delType = data.type || data.recordType;
       var delId = data.id || data.recordId;
+      var delNo = data.invoiceNo || data.no;
+      if (delNo && delType === "invoice") {
+        deleteInvoiceFromSheet(delNo, ss);
+        deleteInvoiceFromSheet(String(delNo).replace(/^#/, ''), ss);
+      }
       var delRes = processDeleteRecord(delType, delId, user, ss);
+      try { CacheService.getScriptCache().remove("cache_sync_bundle"); } catch (ce) {}
       return ContentService.createTextOutput(JSON.stringify(delRes)).setMimeType(ContentService.MimeType.JSON);
     }
 

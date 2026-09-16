@@ -20,11 +20,13 @@ const ALLOWED_UI_SESSION_KEYS = new Set([
   "saved_password",
   "cancelled_invoices",
   "deleted_invoice_ids",
-  "aaryan_app_build_version",
-  "database_history_cleared_at"
+  "aaryan_app_build_version"
 ]);
 
 (function purgeAndLockLocalCache() {
+  try {
+    Storage.prototype.removeItem.call(localStorage, "database_history_cleared_at");
+  } catch(e){}
   try {
     const keysToRemove = [];
     for (let i = 0; i < localStorage.length; i++) {
@@ -169,108 +171,70 @@ globalSettings = {};
       if (tombstones.length !== beforeLen) {
         localStorage.setItem("deleted_invoice_ids", JSON.stringify(tombstones));
       }
+
+      try {
+        let canc = JSON.parse(localStorage.getItem("cancelled_invoices") || "[]");
+        if (canc.length > 0) {
+          const updatedCanc = canc.filter(c => {
+            if (!c) return false;
+            const cId = String(c.id || '').trim().toLowerCase();
+            const cNo = String(c.invoiceNo || '').trim().toLowerCase().replace(/^#/, '');
+            if (cleanId && (cId === cleanId || cId.replace(/^inv_/, '') === cleanId.replace(/^inv_/, ''))) return false;
+            if (cleanNo && cNo === cleanNo) return false;
+            return true;
+          });
+          localStorage.setItem("cancelled_invoices", JSON.stringify(updatedCanc));
+        }
+      } catch (ce) {}
     } catch (e) {
       console.warn("clearInvoiceTombstone error:", e);
-    }
-  };
-
-  // Reconciles tombstones against active valid records (auto-unblocks valid invoices present in cloud or memory)
-  window.reconcileTombstonesWithActiveInvoices = function(invoices) {
-    try {
-      if (!Array.isArray(invoices) || invoices.length === 0) return;
-      let tombstones = window.getDeletedInvoiceTombstones();
-      if (!tombstones || tombstones.length === 0) return;
-
-      let changed = false;
-      invoices.forEach(inv => {
-        if (!inv) return;
-        const hasItems = (Array.isArray(inv.items) && inv.items.length > 0) || (inv.details && Array.isArray(inv.details.items) && inv.details.items.length > 0);
-        const hasCustomer = (inv.customerName && String(inv.customerName).trim() !== 'undefined' && String(inv.customerName).trim().length > 0) || (inv.details && (inv.details.consignee?.name || inv.details.buyer?.name));
-        const hasTotal = parseFloat(inv.total) > 0 || (inv.details && parseFloat(inv.details.total) > 0);
-        if (!hasItems || !hasCustomer || !hasTotal) return;
-
-        const cleanNo = String(inv.invoiceNo || (inv.details && inv.details.invoiceNo) || '').replace(/^#/, '').trim().toLowerCase();
-        const numVal = parseInt(cleanNo, 10);
-        const numStr = !isNaN(numVal) ? String(numVal) : "";
-        const cleanId = String(inv.id || '').trim().toLowerCase();
-
-        // Never unblock known phantom test IDs
-        if (numStr === '201' || numStr === '102') return;
-
-        const beforeLen = tombstones.length;
-        tombstones = tombstones.filter(t => {
-          const item = String(t || '').trim().toLowerCase();
-          if (!item) return false;
-          if (cleanId && item === cleanId) return false;
-          if (cleanNo && (item === cleanNo || item === `#${cleanNo}` || item === `inv_${cleanNo}`)) return false;
-          const itemClean = item.replace(/^#/, '').replace(/^inv_/, '');
-          const itemNum = parseInt(itemClean, 10);
-          const itemNumStr = !isNaN(itemNum) ? String(itemNum) : "";
-          if (numStr && itemNumStr && numStr === itemNumStr) return false;
-          return true;
-        });
-        if (tombstones.length !== beforeLen) changed = true;
-      });
-
-      if (changed) {
-        localStorage.setItem("deleted_invoice_ids", JSON.stringify(tombstones));
-      }
-    } catch (e) {
-      console.warn("reconcileTombstonesWithActiveInvoices error:", e);
     }
   };
 
   window.isInvoiceDeleted = function(inv, tombstones) {
     if (!inv) return true;
     if (!tombstones) tombstones = window.getDeletedInvoiceTombstones();
-    if (!tombstones || tombstones.length === 0) return false;
 
-    const invId = String(inv.id || "").trim().toLowerCase();
+    const invId = String(inv.id || (inv.details && inv.details.id) || "").trim().toLowerCase();
     const invNo = String(inv.invoiceNo || (inv.details && inv.details.invoiceNo) || "").trim().toLowerCase();
     const cleanNo = invNo.replace(/^#/, '');
-    const numVal = parseInt(cleanNo, 10);
-    const numStr = !isNaN(numVal) ? String(numVal) : "";
+    const qrToken = String(inv.qrToken || (inv.details && inv.details.qrToken) || "").trim().toLowerCase();
 
-    const hasItems = (Array.isArray(inv.items) && inv.items.length > 0) || (inv.details && Array.isArray(inv.details.items) && inv.details.items.length > 0);
-    const hasCustomer = (inv.customerName && String(inv.customerName).trim() !== 'undefined' && String(inv.customerName).trim().length > 0) || (inv.details && (inv.details.consignee?.name || inv.details.buyer?.name));
-    const hasTotal = parseFloat(inv.total) > 0 || (inv.details && parseFloat(inv.details.total) > 0);
-    const isValidActiveRecord = hasItems && hasCustomer && hasTotal;
+    // 1. Check persistent cancelled registry
+    try {
+      const cancelled = JSON.parse(localStorage.getItem("cancelled_invoices") || "[]");
+      if (cancelled.length > 0) {
+        const isCanc = cancelled.some(c => {
+          if (!c) return false;
+          const cId = String(c.id || "").trim().toLowerCase();
+          const cNo = String(c.invoiceNo || "").trim().toLowerCase().replace(/^#/, '');
+          const cTok = String(c.token || "").trim().toLowerCase();
+          if (invId && (cId === invId || cId.replace(/^inv_/, '') === invId.replace(/^inv_/, ''))) return true;
+          if (cleanNo && cNo === cleanNo) return true;
+          if (qrToken && cTok && cTok === qrToken) return true;
+          return false;
+        });
+        if (isCanc) return true;
+      }
+    } catch(e) {}
 
+    if (!tombstones || tombstones.length === 0) return false;
+
+    // 2. Check tombstones (by explicit ID, prefixed ID, or invoice number)
     for (let i = 0; i < tombstones.length; i++) {
       const t = String(tombstones[i] || "").trim().toLowerCase();
       if (!t) continue;
       const cleanT = t.replace(/^#/, '').replace(/^inv_/, '');
-      const tNum = parseInt(cleanT, 10);
-      const tNumStr = !isNaN(tNum) ? String(tNum) : "";
 
-      // Exact ID match is ALWAYS a deletion match
-      if (invId && invId === t) return true;
-      if (invId && (invId === `inv_${cleanT}` || invId === `inv_${tNumStr}`)) {
-        if (isValidActiveRecord && invId.length > 12) {
-          if (invId === t) return true;
-        } else {
-          return true;
-        }
-      }
-
-      // Valid active records with full details should NOT be dropped by loose numeric matches unless phantom test ID
-      if (isValidActiveRecord && numStr !== '201' && numStr !== '102') {
-        continue;
-      }
-
-      if (invNo && (invNo === t || cleanNo === cleanT)) return true;
-      if (numStr && tNumStr && numStr === tNumStr) return true;
+      if (invId && (invId === t || invId === `inv_${cleanT}` || invId.replace(/^inv_/, '') === cleanT)) return true;
+      if (cleanNo && (cleanNo === cleanT || invNo === t || invNo === `#${cleanT}` || `inv_${cleanNo}` === t)) return true;
     }
     return false;
   };
 
   window.filterOutDeletedInvoices = function(invoices) {
     if (!Array.isArray(invoices)) return [];
-    if (typeof window.reconcileTombstonesWithActiveInvoices === 'function') {
-      window.reconcileTombstonesWithActiveInvoices(invoices);
-    }
     const tombstones = window.getDeletedInvoiceTombstones();
-    const clearedAt = parseInt(localStorage.getItem("database_history_cleared_at") || "0", 10);
 
     return invoices.filter(inv => {
       if (!inv) return false;
@@ -287,31 +251,6 @@ globalSettings = {};
       const hasTotal = parseFloat(inv.total) > 0 || (inv.details && parseFloat(inv.details.total) > 0);
       if (!hasItems && !hasTotal && (invNo === '0201' || invNo === '0102' || invNo === '201' || invNo === '102' || invId === 'inv_201' || invId === 'inv_102')) {
         return false;
-      }
-
-      // If user cleared history to start from #0001, drop all legacy records prior to the clear timestamp
-      if (clearedAt > 0) {
-        let recordTime = 0;
-        if (inv.createdAt) {
-          recordTime = new Date(inv.createdAt).getTime();
-        } else if (inv.details && inv.details.createdAt) {
-          recordTime = new Date(inv.details.createdAt).getTime();
-        } else if (invId && invId.startsWith('inv_')) {
-          const parts = invId.split('_');
-          if (parts[1] && !isNaN(parseInt(parts[1], 10))) {
-            recordTime = parseInt(parts[1], 10);
-          }
-        } else if (inv.invoiceDate) {
-          const d = new Date(inv.invoiceDate).getTime();
-          if (!isNaN(d)) recordTime = d;
-        }
-
-        if (recordTime > 0 && recordTime <= clearedAt) {
-          return false;
-        }
-        if (recordTime === 0) {
-          return false;
-        }
       }
 
       return !window.isInvoiceDeleted(inv, tombstones);
@@ -1479,7 +1418,7 @@ window.triggerDatabaseSync = async function(forceReload = false) {
         }
       });
 
-      invoicesDb = data.invoices.concat(pendingLocalInvoices);
+      invoicesDb = window.filterOutDeletedInvoices(data.invoices.concat(pendingLocalInvoices));
       invoicesDb.sort((a, b) => String(a.invoiceNo || "").localeCompare(String(b.invoiceNo || "")));
       window.invoicesDb = invoicesDb;
       changed = true;
@@ -4676,7 +4615,8 @@ function triggerInvoiceNumberRollbackEffect(oldVal, newVal) {
       if (elements.billInvoiceNo) elements.billInvoiceNo.classList.remove('invoice-no-rollback-active');
     }, 2500);
 
-    if (typeof showFloatingToast === 'function' && oldVal && oldVal !== newVal) {
+    const isBillingTabActive = document.getElementById("tab-billing")?.classList.contains("active");
+    if (isBillingTabActive && typeof showFloatingToast === 'function' && oldVal && oldVal !== newVal) {
       showFloatingToast(`🔄 Sequence updated: Invoice #${newVal} auto-assigned (freed from deleted #${oldVal})`, "info");
     }
   } catch (err) {
@@ -9677,8 +9617,7 @@ function loadInvoicesHistoryTable() {
     return;
   }
 
-  const isHistoryCleared = !!localStorage.getItem("database_history_cleared_at");
-  if (window.isInitialSyncDone || isHistoryCleared) {
+  if (window.isInitialSyncDone) {
     if (elements.historyCount) elements.historyCount.textContent = "0";
     renderHistoryTableRows([]);
     return;
@@ -10142,9 +10081,9 @@ window.deleteSavedInvoice = function(identifier) {
       AaryanDB.drainOutbox();
     }
 
-    // 7. DIRECTLY roll back invoice sequence
+    // 7. Update suggested invoice sequence
     if (typeof autoSuggestInvoiceNo === 'function') {
-      autoSuggestInvoiceNo(true, invNo);
+      autoSuggestInvoiceNo(false);
     }
 
     // 8. Re-render UI immediately
@@ -10152,8 +10091,8 @@ window.deleteSavedInvoice = function(identifier) {
     if (typeof loadInvoicesHistoryTable === 'function') loadInvoicesHistoryTable();
     if (typeof window.broadcastDatabaseMutation === 'function') window.broadcastDatabaseMutation();
 
-    if (typeof showToast === 'function') {
-      showToast(`Invoice ${displayNo} deleted successfully`, "success");
+    if (typeof showFloatingToast === 'function') {
+      showFloatingToast(`Invoice ${displayNo} deleted successfully`, "success");
     }
   }
 };

@@ -69,13 +69,14 @@
       } catch (e) {}
     }
     // Build Version Enforcement: Clears stale caches when new build is deployed
-    window.__APP_BUILD_VERSION__ = "v400_strict_deleted_invoice_qr_invalidation";
+    window.__APP_BUILD_VERSION__ = "v401_fix_invoice_deletion_and_history_persistence";
     try {
       const storedBuild = localStorage.getItem("aaryan_app_build_version");
       if (storedBuild !== window.__APP_BUILD_VERSION__) {
         localStorage.setItem("aaryan_app_build_version", window.__APP_BUILD_VERSION__);
         localStorage.removeItem("aaryan_last_sync_time");
         localStorage.removeItem("aaryandb_migrated_v2");
+        localStorage.removeItem("database_history_cleared_at");
       }
     } catch (e) {}
   </script>

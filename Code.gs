@@ -1228,6 +1228,7 @@ function handleApiPost(e) {
         deleteInvoiceFromSheet(String(delNo).replace(/^#/, ''), ss);
       }
       var delRes = processDeleteRecord(delType, delId, user, ss);
+      try { CacheService.getScriptCache().remove("cache_sync_bundle"); } catch (ce) {}
       return ContentService.createTextOutput(JSON.stringify(delRes)).setMimeType(ContentService.MimeType.JSON);
     }
 
