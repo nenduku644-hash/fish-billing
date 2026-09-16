@@ -976,6 +976,10 @@ function initRealtimeMeshSync() {
       realtimeMeshClient.subscribe('aaryan_aqua_gst_billing_2026/whatsapp_ack', { qos: 0 });
       // Announce presence and request state from any active peer
       broadcastInterTabEvent('SYNC_REQUEST', { requesterId: MY_SYNC_CLIENT_ID });
+      // Proactively request latest WhatsApp Bot Status from host companion
+      try {
+        realtimeMeshClient.publish('aaryan_aqua_gst_billing_2026/whatsapp_commands', JSON.stringify({ command: 'get_status' }));
+      } catch (e) {}
       if (typeof window.updateRealtimePresenceHUD === 'function') window.updateRealtimePresenceHUD("live");
     });
 
@@ -992,6 +996,17 @@ function initRealtimeMeshSync() {
         if (topic === 'aaryan_aqua_gst_billing_2026/whatsapp_status') {
           const waData = JSON.parse(message.toString());
           if (waData && typeof waData === 'object') {
+            // Guard against transient or stale downgrade packets if currently connected and live
+            if (whatsappBotStatus && (whatsappBotStatus.status === 'CONNECTED' || whatsappBotStatus.isReady)) {
+              if (waData.status === 'INITIALIZING') {
+                return; // Ignore transient initializing packet if already connected
+              }
+              const currentTimestamp = Number(whatsappBotStatus.lastHeartbeat || whatsappBotStatus.timestamp || 0);
+              const incomingTimestamp = Number(waData.lastHeartbeat || waData.timestamp || 0);
+              if (incomingTimestamp && currentTimestamp && incomingTimestamp < currentTimestamp) {
+                return; // Ignore older out-of-order packets
+              }
+            }
             whatsappBotStatus = waData;
             saveWaStatusCache(waData);
             updateWhatsAppBotPillUI(whatsappBotStatus);
@@ -7546,7 +7561,7 @@ window.isLiveBotConnected = function() {
   const hb = Number(whatsappBotStatus.lastHeartbeat || whatsappBotStatus.timestamp || 0);
   if (!hb) return true;
   const age = Date.now() - hb;
-  return age < 60000; // Must have heartbeat within last 60 seconds
+  return age < 90000; // Must have heartbeat within last 90 seconds
 };
 
 function saveWaStatusCache(data) {
@@ -7620,11 +7635,6 @@ function getWhatsAppApiEndpoint(path) {
 function setupAdaptiveWhatsAppPolling() {
   if (whatsappAdaptiveTimer) clearTimeout(whatsappAdaptiveTimer);
 
-  if (!isLocalCompanionAvailable()) {
-    fetchWhatsAppBotStatus();
-    return;
-  }
-
   const poll = async () => {
     await fetchWhatsAppBotStatus();
     const isBusy = whatsappBotStatus && (
@@ -7632,7 +7642,7 @@ function setupAdaptiveWhatsAppPolling() {
       whatsappBotStatus.status === 'AUTHENTICATING' ||
       whatsappBotStatus.isDispatching
     );
-    const nextInterval = isBusy ? 1500 : 7000;
+    const nextInterval = isBusy ? 2000 : 6000;
     whatsappAdaptiveTimer = setTimeout(poll, nextInterval);
   };
 
@@ -7641,14 +7651,15 @@ function setupAdaptiveWhatsAppPolling() {
 
 async function fetchWhatsAppBotStatus() {
   if (!isLocalCompanionAvailable()) {
-    // When on public web (GitHub Pages, Netlify), query bot status via MQTT mesh instead of blocked loopback HTTP
-    if (realtimeMeshClient && realtimeMeshClient.connected && (!whatsappBotStatus || whatsappBotStatus.status !== 'CONNECTED')) {
+    // When on public web (GitHub Pages, Netlify), query bot status via MQTT mesh
+    if (realtimeMeshClient && realtimeMeshClient.connected) {
       try {
         realtimeMeshClient.publish('aaryan_aqua_gst_billing_2026/whatsapp_commands', JSON.stringify({ command: 'get_status' }));
       } catch (me) {}
     }
-    if (!whatsappBotStatus || !whatsappBotStatus.status || whatsappBotStatus.status === 'DISCONNECTED') {
-      whatsappBotStatus = whatsappBotStatus || { status: 'DISCONNECTED', isReady: false, webDirect: true };
+    // Prevent getting stuck in INITIALIZING if no response for 10s
+    if (whatsappBotStatus && whatsappBotStatus.status === 'INITIALIZING' && (Date.now() - (whatsappBotStatus.timestamp || 0) > 10000)) {
+      whatsappBotStatus = { status: 'DISCONNECTED', isReady: false, webDirect: true };
       updateWhatsAppBotPillUI(whatsappBotStatus);
       updateWhatsAppBotModalUI(whatsappBotStatus);
     }

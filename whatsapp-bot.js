@@ -183,11 +183,21 @@ async function handleDisconnect() {
 
 function initMqttBridge() {
   const brokers = [
-    'wss://test.mosquitto.org:8081',
+    'wss://test.mosquitto.org:8081/mqtt',
     'wss://broker.emqx.io:8084/mqtt',
     'wss://broker.hivemq.com:8884/mqtt'
   ];
   let brokerIdx = 0;
+  let reconnectTimer = null;
+
+  function scheduleReconnect() {
+    if (reconnectTimer) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      brokerIdx = (brokerIdx + 1) % brokers.length;
+      connect();
+    }, 2500);
+  }
 
   function connect() {
     if (mqttBridgeClient) {
@@ -218,17 +228,19 @@ function initMqttBridge() {
     });
 
     mqttBridgeClient.on('connect', () => {
-      console.log(`⚡ WhatsApp Bot Cloud Mesh ACTIVE via ${broker}! Synchronizing live QR & commands to Netlify.`);
+      console.log(`⚡ WhatsApp Bot Cloud Mesh ACTIVE via ${broker}! Synchronizing live QR & commands to GitHub Pages / Cloud.`);
       mqttBridgeClient.subscribe(WA_COMMANDS_TOPIC, { qos: 0 });
       broadcastStatus();
 
-      // Ensure periodic 10s heartbeat so web clients know the bot is genuinely alive
+      // Ensure periodic 8s heartbeat so web clients know the bot is genuinely alive
       if (!global.waHeartbeatInterval) {
         global.waHeartbeatInterval = setInterval(() => {
           if (mqttBridgeClient && mqttBridgeClient.connected) {
             broadcastStatus();
+          } else {
+            scheduleReconnect();
           }
-        }, 10000);
+        }, 8000);
       }
     });
 
@@ -336,10 +348,12 @@ function initMqttBridge() {
 
     mqttBridgeClient.on('error', (err) => {
       console.warn('MQTT mesh bridge error:', err.message);
+      scheduleReconnect();
     });
 
     mqttBridgeClient.on('close', () => {
-      brokerIdx = (brokerIdx + 1) % brokers.length;
+      console.warn('MQTT mesh bridge closed, reconnecting to mesh...');
+      scheduleReconnect();
     });
   }
 
@@ -897,7 +911,7 @@ app.get('/companion', (req, res) => {
 });
 
 // Start Server & Initialize Client
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`\n======================================================`);
   console.log(`🚀 AARYAN AQUA NEEDS - WhatsApp Bot Companion Running!`);
   console.log(`📡 Web Dashboard: http://localhost:${PORT}`);
@@ -906,7 +920,7 @@ app.listen(PORT, () => {
   // Launch initial client
   initClient();
 
-  // Launch Cloud Mesh MQTT Bridge for Netlify
+  // Launch Cloud Mesh MQTT Bridge
   initMqttBridge();
 
   // Only open browser if explicitly instructed via AUTO_OPEN='true' and not in daemon mode
@@ -914,6 +928,14 @@ app.listen(PORT, () => {
     const startCmd = process.platform === 'win32' ? 'start' : process.platform === 'darwin' ? 'open' : 'xdg-open';
     exec(`${startCmd} http://localhost:${PORT}`);
   }
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`❌ Port ${PORT} is already in use by another WhatsApp Bot instance. Exiting duplicate process.`);
+    process.exit(0);
+  }
+  console.error('Server error:', err);
 });
 
 function publishShutdownStatus() {
