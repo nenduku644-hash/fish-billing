@@ -6590,6 +6590,16 @@ window.saveCurrentInvoiceRecord = async function(actionType = 'save_only', btnEl
       // save_only ("Generate & Save Invoice"):
       // Fully automated: saves invoice, compiles PDF, syncs Google Drive & auto-dispatches via WhatsApp bot silently in background
       showFloatingToast(`✅ Invoice #${invoiceRecord.invoiceNo} successfully created & saved!`);
+
+      // Trigger automatic silent WhatsApp dispatch in background
+      try {
+        if (typeof autoDispatchInvoiceToWhatsApp === 'function') {
+          autoDispatchInvoiceToWhatsApp(invoiceRecord).catch(e => console.warn("Auto WhatsApp dispatch note:", e));
+        }
+      } catch (waErr) {
+        console.warn("Auto WhatsApp trigger error:", waErr);
+      }
+
       if (typeof openInvoiceSuccessModal === 'function') {
         openInvoiceSuccessModal(invoiceRecord);
         resetBillingForm();
@@ -6783,7 +6793,7 @@ window.triggerSuccessModalWhatsApp = function() {
   if (!lastSavedInvoiceRecord) return;
   const rec = lastSavedInvoiceRecord;
   const waBtn = document.getElementById("modal-success-btn-whatsapp");
-  shareInvoicePdfNative(rec.details, waBtn, true); // force1Click = true ensures immediate delivery / fallback!
+  shareInvoicePdfNative(rec.details, waBtn, false);
 };
 
 window.triggerSuccessModalUniversalShare = function() {
@@ -8999,7 +9009,8 @@ async function dispatchWhatsAppBotInvoice({ phone, text, filename, pdfBase64 }) 
   if (realtimeMeshClient && realtimeMeshClient.connected) {
     try {
       const cmdId = 'inv_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
-      const safePdfBase64 = pdfBase64 ? pdfBase64 : null;
+      // MQTT packet size safety: send base64 over broker only if under 64KB (otherwise text with Drive PDF link is delivered)
+      const safePdfBase64 = (pdfBase64 && pdfBase64.length < 65536) ? pdfBase64 : null;
       
       const ackPromise = waitForMqttBotAck(cmdId, 25000);
 
@@ -9095,6 +9106,9 @@ async function dispatchWhatsAppBotMessage({ phone, text }) {
 async function autoDispatchInvoiceToWhatsApp(details, textOrBase64 = null, precomputedBase64 = null) {
   if (!details) return false;
 
+  const actualDetails = (details && details.details && typeof details.details === 'object') ? details.details : details;
+  const invNo = actualDetails.invoiceNo || details.invoiceNo || 'INV';
+
   let text = textOrBase64;
   let pdfBase64 = precomputedBase64;
 
@@ -9105,27 +9119,27 @@ async function autoDispatchInvoiceToWhatsApp(details, textOrBase64 = null, preco
   }
 
   const recipientsInfo = typeof getInvoiceRecipients === 'function'
-    ? getInvoiceRecipients(details)
-    : { primaryPhone: getCustomerPhoneNumber(details), consigneeName: details.consignee?.name, buyerName: details.buyer?.name, allRecipients: [] };
+    ? getInvoiceRecipients(actualDetails)
+    : { primaryPhone: getCustomerPhoneNumber(actualDetails), consigneeName: actualDetails.consignee?.name, buyerName: actualDetails.buyer?.name, allRecipients: [] };
 
   if (!recipientsInfo.primaryPhone && (!recipientsInfo.allRecipients || recipientsInfo.allRecipients.length === 0)) {
     console.log("Auto WhatsApp dispatch skipped: No recipient phone numbers found.");
     return false;
   }
 
-  const custName = details.consignee?.name || details.buyer?.name || details.customerName || 'Customer';
+  const custName = actualDetails.consignee?.name || actualDetails.buyer?.name || details.customerName || 'Customer';
   const customerClean = custName.replace(/[^a-zA-Z0-9]/g, '_');
-  const filename = `Invoice_${details.invoiceNo}_${customerClean}.pdf`;
+  const filename = `Invoice_${invNo}_${customerClean}.pdf`;
 
   // Pre-compile PDF if not yet done so Google Drive URL is ready for WhatsApp
   if (!pdfBase64) {
     try {
-      const gen = await generateInvoicePdfBlob(details);
+      const gen = await generateInvoicePdfBlob(actualDetails);
       if (gen) {
         pdfBase64 = gen.pdfBase64;
-        if (gen.pdfUrl && !details.pdfUrl) {
-          details.pdfUrl = gen.pdfUrl;
-          if (details.details) details.details.pdfUrl = gen.pdfUrl;
+        if (gen.pdfUrl && !actualDetails.pdfUrl) {
+          actualDetails.pdfUrl = gen.pdfUrl;
+          if (actualDetails.details) actualDetails.details.pdfUrl = gen.pdfUrl;
         }
       }
     } catch (err) {
@@ -9136,8 +9150,8 @@ async function autoDispatchInvoiceToWhatsApp(details, textOrBase64 = null, preco
   // Ensure text caption is clean and complete (with item details & Google Drive link)
   if (!text || typeof text !== 'string' || text.startsWith('data:') || text.startsWith('JVBERi0')) {
     text = typeof generateWhatsAppInvoiceMessage === 'function'
-      ? generateWhatsAppInvoiceMessage(details)
-      : formatInvoiceWhatsAppSummary(details);
+      ? generateWhatsAppInvoiceMessage(actualDetails)
+      : formatInvoiceWhatsAppSummary(actualDetails);
   }
 
   // Check live status if needed
@@ -9168,8 +9182,12 @@ async function autoDispatchInvoiceToWhatsApp(details, textOrBase64 = null, preco
     }
 
     if (anySent) {
+      if (details.details) details.waAutoSent = true;
+      if (typeof window.updateSuccessModalWhatsAppStatus === 'function') {
+        window.updateSuccessModalWhatsAppStatus(details.details ? details : { details });
+      }
       if (typeof playSuccessChime === 'function') playSuccessChime();
-      showFloatingToast(`🚀 Invoice #${details.invoiceNo} & PDF dispatched via WhatsApp to ${dispatchedList.join(" & ")}!`, 6000);
+      showFloatingToast(`🚀 Invoice #${invNo} & PDF dispatched via WhatsApp to ${dispatchedList.join(" & ")}!`, 6000);
       return true;
     }
   } else {
@@ -9269,7 +9287,7 @@ window.shareInvoicePdfNative = async function(details, btnEl = null, force1Click
   let isBotReady = whatsappBotStatus && (whatsappBotStatus.isReady || whatsappBotStatus.status === 'CONNECTED') && (typeof window.isLiveBotConnected === 'function' ? window.isLiveBotConnected() : true);
 
   // --- AUTOMATED BACKGROUND BOT DISPATCH (Direct PDF Document Attachment) ---
-  if (isBotReady && cleanPhone && !force1Click) {
+  if (isBotReady && cleanPhone) {
     if (btnEl && btnEl.tagName) {
       btnEl.innerHTML = `<i class="fa-solid fa-cloud-arrow-up fa-fade"></i> Sending via Bot...`;
     }
@@ -9301,6 +9319,12 @@ window.shareInvoicePdfNative = async function(details, btnEl = null, force1Click
 
       if (sentCount > 0) {
         anyDelivered = true;
+        if (lastSavedInvoiceRecord) {
+          lastSavedInvoiceRecord.waAutoSent = true;
+          if (typeof updateSuccessModalWhatsAppStatus === 'function') {
+            updateSuccessModalWhatsAppStatus(lastSavedInvoiceRecord);
+          }
+        }
         if (typeof playSuccessChime === 'function') playSuccessChime();
         if (btnEl && btnEl.tagName) {
           btnEl.innerHTML = `<i class="fa-solid fa-circle-check text-success"></i> Sent via Bot!`;
