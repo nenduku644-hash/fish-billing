@@ -1,5 +1,6 @@
 @echo off
 title Aaryan Aqua Needs - WhatsApp Bot Companion
+cd /d "%~dp0"
 cls
 echo ========================================================
 echo   AARYAN AQUA NEEDS - WHATSAPP BOT COMPANION

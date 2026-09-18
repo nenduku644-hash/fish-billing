@@ -852,18 +852,19 @@ body {
   display: flex !important;
   align-items: center !important;
   justify-content: flex-end !important;
-  gap: 6px !important;
+  gap: 8px !important;
   flex: 1 1 auto !important;
   min-width: 0 !important;
-  max-height: 44px !important;
-  overflow: hidden !important;
-  white-space: nowrap !important;
-  flex-wrap: nowrap !important;
+  flex-wrap: wrap !important;
   margin-left: auto !important;
 }
 
-.app-top-header-meta::-webkit-scrollbar {
-  display: none !important;
+.header-meta-group,
+.header-tools-group {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  flex-shrink: 0 !important;
 }
 
 .app-top-header-meta > * {
@@ -876,31 +877,53 @@ body {
   flex-shrink: 0 !important;
 }
 
-@media (max-width: 1550px) {
-  #current-datetime {
-    display: none !important;
-  }
+.header-clock-pill {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 4px 10px !important;
+  border-radius: 9999px !important;
+  background: #f1f5f9 !important;
+  border: 1px solid #e2e8f0 !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  color: #334155 !important;
+  font-variant-numeric: tabular-nums !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
 }
 
-@media (max-width: 1350px) {
+#current-datetime {
+  display: inline-block !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+@media (max-width: 1200px) {
   .app-top-header-meta {
-    gap: 4px !important;
+    gap: 5px !important;
   }
-  .app-top-header-meta > * {
-    padding: 3px 6px !important;
+  .app-top-header-meta .cloud-sync-pill,
+  .app-top-header-meta .whatsapp-sync-pill,
+  .app-top-header-meta .telegram-sync-pill,
+  .app-top-header-meta .data-share-pill,
+  .app-top-header-meta .calc-pill,
+  .app-top-header-meta .audio-fx-pill {
+    padding: 3px 8px !important;
     font-size: 11px !important;
   }
-  #live-whatsapp-pill span {
-    display: none !important;
-  }
-  #live-telegram-pill span {
+}
+
+@media (max-width: 992px) {
+  #live-whatsapp-pill span,
+  #live-telegram-pill span,
+  #live-data-share-pill span,
+  #live-audio-fx-pill span {
     display: none !important;
   }
 }
 
-@media (max-width: 1150px) {
-  #live-audio-fx-pill span,
-  #live-data-share-pill span {
+@media (max-width: 768px) {
+  .header-clock-pill {
     display: none !important;
   }
 }
@@ -1309,6 +1332,22 @@ body {
 .action-btn.print:hover { color: #0d9488 !important; background: #f0fdfa !important; border-color: rgba(13, 148, 136, 0.2) !important; }
 .action-btn.share:hover { color: #10b981 !important; background: #ecfdf5 !important; border-color: rgba(16, 185, 129, 0.2) !important; }
 .action-btn.btn-whatsapp:hover { color: #16a34a !important; background: #f0fdf4 !important; border-color: rgba(22, 163, 74, 0.25) !important; }
+.action-btn.primary-wa-action {
+  background: #16a34a !important;
+  color: #ffffff !important;
+  border: 1px solid #15803d !important;
+  box-shadow: 0 2px 4px rgba(22, 163, 74, 0.25);
+  font-weight: 700;
+}
+.action-btn.primary-wa-action i {
+  color: #ffffff !important;
+}
+.action-btn.primary-wa-action:hover {
+  background: #15803d !important;
+  color: #ffffff !important;
+  transform: scale(1.1);
+  box-shadow: 0 3px 6px rgba(21, 128, 61, 0.35);
+}
 .action-btn.btn-telegram:hover { color: #0284c7 !important; background: #f0f9ff !important; border-color: rgba(2, 132, 199, 0.25) !important; }
 .action-btn.delete:hover { color: #e11d48 !important; background: #fef2f2 !important; border-color: rgba(225, 29, 72, 0.2) !important; }
 
@@ -6925,207 +6964,313 @@ section.content-view.hidden {
   opacity: 0 !important;
 }
 
-.chart-canvas-container {
-  height: 180px;
-  width: 100%;
-  position: relative;
-  box-sizing: border-box;
-}
+/* ==========================================================================
+   DASHBOARD EXECUTIVE LAYOUT & CLEAN RESPONSIVENESS
+   ========================================================================== */
 
-@media (min-width: 901px) {
-  #view-dashboard.content-view:not(.hidden) {
-    height: calc(100vh - 56px) !important;
-    height: calc(100dvh - 56px) !important;
-    max-height: calc(100vh - 56px) !important;
-    max-height: calc(100dvh - 56px) !important;
-    overflow-y: hidden !important;
-    overflow-x: hidden !important;
-    display: flex !important;
-    flex-direction: column !important;
-    padding: clamp(5px, 0.9vh, 12px) 16px clamp(5px, 0.9vh, 10px) 16px !important;
-    box-sizing: border-box !important;
-    gap: clamp(4px, 0.65vh, 8px) !important;
-  }
-
-  /* 1. Hero Welcome & Quick Action Card */
-  #view-dashboard .dashboard-hero-card {
-    padding: clamp(5px, 0.75vh, 9px) clamp(10px, 1.2vw, 16px) !important;
-    margin-bottom: 0 !important;
-    margin-top: 0 !important;
-    flex-shrink: 0 !important;
-    border-radius: 9px !important;
-  }
-
-  #view-dashboard .hero-text-content h2 {
-    font-size: clamp(13px, 1.5vh, 16px) !important;
-    margin: 0 !important;
-    line-height: 1.2 !important;
-  }
-
-  #view-dashboard .hero-text-content p {
-    font-size: clamp(9px, 1.1vh, 11px) !important;
-    margin: 1px 0 0 0 !important;
-  }
-
-  #view-dashboard .hero-badge {
-    font-size: clamp(7.5px, 0.95vh, 9px) !important;
-    padding: 1px 5px !important;
-  }
-
-  #view-dashboard .btn-hero {
-    padding: clamp(3px, 0.5vh, 6px) clamp(7px, 0.8vw, 11px) !important;
-    font-size: clamp(10px, 1.15vh, 11.5px) !important;
-    border-radius: 6px !important;
-  }
-
-  /* 2. Symmetrical 8-Card Metric Grid */
-  #view-dashboard .stats-grid {
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-    gap: clamp(4px, 0.6vh, 8px) !important;
-    flex-shrink: 0 !important;
-    display: grid !important;
-    grid-template-columns: repeat(4, 1fr) !important;
-  }
-
-  #view-dashboard .stat-card {
-    padding: clamp(4px, 0.6vh, 7px) clamp(7px, 0.85vw, 11px) !important;
-    gap: clamp(5px, 0.7vw, 9px) !important;
-    border-radius: 8px !important;
-  }
-
-  #view-dashboard .stat-icon {
-    width: clamp(24px, 3vh, 30px) !important;
-    height: clamp(24px, 3vh, 30px) !important;
-    font-size: clamp(10.5px, 1.25vh, 12.5px) !important;
-    border-radius: 6px !important;
-    flex-shrink: 0 !important;
-  }
-
-  #view-dashboard .stat-label {
-    font-size: clamp(7.5px, 0.9vh, 8.5px) !important;
-    letter-spacing: 0.04em !important;
-  }
-
-  #view-dashboard .stat-details h3 {
-    font-size: clamp(12.5px, 1.6vh, 15.5px) !important;
-    margin: 1px 0 !important;
-    line-height: 1.15 !important;
-  }
-
-  #view-dashboard .stat-trend {
-    font-size: clamp(8px, 1vh, 9.5px) !important;
-    margin-top: 0 !important;
-  }
-
-  /* 3. Analytics Charts Grid */
-  #view-dashboard .analytics-charts-grid {
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-    gap: clamp(4px, 0.65vh, 8px) !important;
-    flex-shrink: 0 !important;
-    display: grid !important;
-    grid-template-columns: 1fr 1fr !important;
-  }
-
-  #view-dashboard .analytics-charts-grid .card-box {
-    margin: 0 !important;
-    border-radius: 8px !important;
-  }
-
-  #view-dashboard .card-box-header {
-    padding: clamp(3px, 0.55vh, 6px) clamp(8px, 1vw, 12px) !important;
-  }
-
-  #view-dashboard .card-box-header h3 {
-    font-size: clamp(10.5px, 1.25vh, 12px) !important;
-    margin: 0 !important;
-  }
-
-  #view-dashboard .card-box-header .badge-status {
-    font-size: clamp(8px, 0.95vh, 9px) !important;
-    padding: 1px 5px !important;
-  }
-
-  #view-dashboard .chart-canvas-container {
-    height: clamp(70px, 11.5vh, 130px) !important;
-    padding: 2px 4px !important;
-    position: relative !important;
-    box-sizing: border-box !important;
-  }
-
-  /* 4. Recent Invoices & Billing Logs Card (Flex-expands to fill all remaining height) */
-  #view-dashboard .card-box.margin-top-12 {
-    margin-top: 0 !important;
-    flex: 1 1 0% !important;
-    min-height: 0 !important;
-    display: flex !important;
-    flex-direction: column !important;
-    overflow: hidden !important;
-    border-radius: 8px !important;
-  }
-
-  #view-dashboard .card-box.margin-top-12 .card-box-header {
-    flex-shrink: 0 !important;
-    padding: clamp(3px, 0.55vh, 6px) clamp(8px, 1vw, 12px) !important;
-  }
-
-  #view-dashboard .card-box.margin-top-12 .card-box-header h3 {
-    font-size: clamp(10.5px, 1.25vh, 12px) !important;
-    margin: 0 !important;
-  }
-
-  #view-dashboard .table-responsive {
-    flex: 1 1 auto !important;
-    min-height: 0 !important;
-    max-height: none !important;
-    overflow-y: auto !important;
-    overflow-x: auto !important;
-    scrollbar-width: thin !important;
-    scrollbar-color: #94a3b8 rgba(0, 0, 0, 0.04) !important;
-  }
-
-  #view-dashboard .table-responsive::-webkit-scrollbar {
-    width: 6px !important;
-    height: 6px !important;
-  }
-
-  #view-dashboard .table-responsive::-webkit-scrollbar-thumb {
-    background: #cbd5e1 !important;
-    border-radius: 4px !important;
-  }
-
-  #view-dashboard .dashboard-table th {
-    position: sticky !important;
-    top: 0 !important;
-    z-index: 5 !important;
-    background: #f8fafc !important;
-    padding: clamp(3px, 0.5vh, 6px) clamp(6px, 0.8vw, 10px) !important;
-    font-size: clamp(9px, 1.1vh, 10.5px) !important;
-    border-bottom: 1px solid #e2e8f0 !important;
-  }
-
-  #view-dashboard .dashboard-table td {
-    padding: clamp(2.5px, 0.45vh, 5px) clamp(6px, 0.8vw, 10px) !important;
-    font-size: clamp(10px, 1.15vh, 11px) !important;
-    border-bottom: 1px solid #f1f5f9 !important;
-  }
-
-  #view-dashboard .dashboard-table .action-btn {
-    width: clamp(20px, 2.5vh, 24px) !important;
-    height: clamp(20px, 2.5vh, 24px) !important;
-    font-size: clamp(9px, 1.1vh, 10.5px) !important;
-    padding: 0 !important;
-  }
-}
-
-/* Optional Scroll View Mode (Only when user explicitly toggles to standard document scroll) */
-#view-dashboard.dashboard-scroll-mode:not(.hidden) {
+#view-dashboard.content-view:not(.hidden) {
   height: auto !important;
-  max-height: none !important;
+  min-height: calc(100vh - 56px) !important;
   overflow-y: auto !important;
+  overflow-x: hidden !important;
   display: block !important;
-  padding: 16px 20px 90px 20px !important;
+  padding: 16px 20px 80px 20px !important;
+  box-sizing: border-box !important;
+}
+
+/* Dashboard Hero Card */
+#view-dashboard .dashboard-hero-card {
+  background: linear-gradient(135deg, #090d16 0%, #0f172a 45%, #0e384c 100%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 12px !important;
+  padding: 14px 20px !important;
+  margin: 0 0 12px 0 !important;
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.2) !important;
+  flex-wrap: wrap !important;
+  gap: 12px !important;
+  box-sizing: border-box !important;
+}
+
+#view-dashboard .hero-text-content h2 {
+  font-family: 'Outfit', sans-serif !important;
+  font-size: 17px !important;
+  font-weight: 800 !important;
+  color: #ffffff !important;
+  margin: 3px 0 2px 0 !important;
+  line-height: 1.2 !important;
+}
+
+#view-dashboard .hero-text-content p {
+  font-size: 11.5px !important;
+  color: #94a3b8 !important;
+  margin: 0 !important;
+  line-height: 1.2 !important;
+}
+
+#view-dashboard .hero-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  background: rgba(14, 165, 233, 0.18) !important;
+  border: 1px solid rgba(56, 189, 248, 0.35) !important;
+  color: #38bdf8 !important;
+  font-size: 9.5px !important;
+  font-weight: 800 !important;
+  padding: 2px 8px !important;
+  border-radius: 9999px !important;
+  letter-spacing: 0.5px !important;
+  text-transform: uppercase !important;
+}
+
+#view-dashboard .hero-actions {
+  display: flex !important;
+  gap: 8px !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+}
+
+#view-dashboard .btn-hero {
+  padding: 6px 13px !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  border-radius: 7px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  cursor: pointer !important;
+}
+
+/* Symmetrical 8-Card Metric Grid */
+#view-dashboard .stats-grid {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+  margin-top: 0 !important;
+  margin-bottom: 14px !important;
+  width: 100% !important;
+}
+
+#view-dashboard .stat-card {
+  background: #ffffff !important;
+  border: 1px solid rgba(226, 232, 240, 0.9) !important;
+  border-radius: 11px !important;
+  padding: 12px 14px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 11px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  transition: all 0.2s ease !important;
+}
+
+#view-dashboard .stat-card:hover {
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06) !important;
+  border-color: rgba(2, 132, 199, 0.3) !important;
+}
+
+#view-dashboard .stat-icon {
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 9px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 15px !important;
+  flex-shrink: 0 !important;
+}
+
+#view-dashboard .stat-details {
+  min-width: 0 !important;
+  flex: 1 !important;
+  overflow: hidden !important;
+}
+
+#view-dashboard .stat-label {
+  font-size: 9.5px !important;
+  font-weight: 700 !important;
+  color: #64748b !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  display: block !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+#view-dashboard .stat-details h3 {
+  font-size: 17.5px !important;
+  font-weight: 800 !important;
+  color: #0f172a !important;
+  margin: 1px 0 !important;
+  font-family: 'Outfit', sans-serif !important;
+  letter-spacing: -0.02em !important;
+  line-height: 1.2 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+#view-dashboard .stat-trend {
+  font-size: 9.5px !important;
+  font-weight: 600 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+@media (max-width: 1150px) {
+  #view-dashboard .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 600px) {
+  #view-dashboard .stats-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Analytics Charts Grid */
+#view-dashboard .analytics-charts-grid {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr) !important;
+  gap: 14px !important;
+  margin-top: 0 !important;
+  margin-bottom: 14px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+#view-dashboard .analytics-charts-grid .card-box {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  margin: 0 !important;
+  border-radius: 11px !important;
+  background: #ffffff !important;
+  border: 1px solid rgba(226, 232, 240, 0.9) !important;
+  padding: 12px 16px !important;
+  box-sizing: border-box !important;
+}
+
+#view-dashboard .chart-canvas-container {
+  height: 240px !important;
+  max-height: 240px !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  position: relative !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+}
+
+#view-dashboard .chart-canvas-container canvas {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  display: block !important;
+}
+
+@media (max-width: 992px) {
+  #view-dashboard .analytics-charts-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Recent Invoices & Customer Ledger Cards */
+#view-dashboard .card-box.margin-top-12 {
+  margin-top: 0 !important;
+  margin-bottom: 14px !important;
+  border-radius: 11px !important;
+  background: #ffffff !important;
+  border: 1px solid rgba(226, 232, 240, 0.9) !important;
+  padding: 12px 16px !important;
+  box-sizing: border-box !important;
+}
+
+#view-dashboard .card-box-header {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  padding-bottom: 8px !important;
+  margin-bottom: 10px !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+}
+
+#view-dashboard .card-box-header h3 {
+  font-size: 13.5px !important;
+  font-weight: 700 !important;
+  color: #0f172a !important;
+  margin: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+}
+
+#view-dashboard .table-responsive {
+  width: 100% !important;
+  max-height: 380px !important;
+  overflow-y: auto !important;
+  overflow-x: auto !important;
+  border-radius: 8px !important;
+  border: 1px solid #e2e8f0 !important;
+  background: #ffffff !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+
+#view-dashboard .dashboard-table {
+  width: 100% !important;
+  min-width: 720px !important;
+  border-collapse: collapse !important;
+}
+
+#view-dashboard .dashboard-table th {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 5 !important;
+  background: #f8fafc !important;
+  padding: 8px 12px !important;
+  font-size: 10.5px !important;
+  font-weight: 700 !important;
+  color: #64748b !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  letter-spacing: 0.04em !important;
+}
+
+#view-dashboard .dashboard-table td {
+  padding: 8px 12px !important;
+  font-size: 12px !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  vertical-align: middle !important;
+}
+
+/* Optional Compact Fit Screen Mode (Only when explicitly toggled on) */
+#view-dashboard.dashboard-fitted-mode:not(.hidden) {
+  height: calc(100vh - 56px) !important;
+  max-height: calc(100vh - 56px) !important;
+  overflow-y: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  padding: 8px 14px !important;
+  gap: 6px !important;
+}
+
+#view-dashboard.dashboard-fitted-mode .chart-canvas-container {
+  height: 140px !important;
+  max-height: 140px !important;
 }
 
 
@@ -7400,76 +7545,92 @@ section.content-view.hidden {
 /* 3. Enterprise Trust Badges Strip (Hero Sub-Banner) */
 .enterprise-trust-strip {
   display: grid !important;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)) !important;
-  gap: 12px !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 10px !important;
   width: 100% !important;
+  margin-top: 0 !important;
+  margin-bottom: 14px !important;
+}
+
+@media (max-width: 1100px) {
+  .enterprise-trust-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 600px) {
+  .enterprise-trust-strip {
+    grid-template-columns: 1fr !important;
+  }
 }
 
 .trust-badge-item {
   display: flex !important;
   align-items: center !important;
-  gap: 12px !important;
+  gap: 10px !important;
   background: #ffffff !important;
   border: 1px solid #e2e8f0 !important;
-  border-radius: 12px !important;
-  padding: 10px 14px !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
-  transition: all 0.25s ease !important;
+  border-radius: 10px !important;
+  padding: 8px 12px !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03) !important;
+  transition: all 0.2s ease !important;
+  min-width: 0 !important;
 }
 
 .trust-badge-item:hover {
-  border-color: #0891b2 !important;
-  box-shadow: 0 4px 12px rgba(8, 145, 178, 0.1) !important;
-  transform: translateY(-2px) !important;
+  border-color: #0284c7 !important;
+  box-shadow: 0 3px 10px rgba(2, 132, 199, 0.08) !important;
+  transform: translateY(-1px) !important;
 }
 
 .trust-badge-icon {
-  width: 38px !important;
-  height: 38px !important;
-  border-radius: 10px !important;
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 8px !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  font-size: 16px !important;
+  font-size: 14px !important;
   flex-shrink: 0 !important;
 }
 
 .trust-badge-icon.gst-badge {
-  background: rgba(16, 185, 129, 0.14) !important;
+  background: rgba(16, 185, 129, 0.12) !important;
   color: #059669 !important;
-  border: 1px solid rgba(16, 185, 129, 0.3) !important;
+  border: 1px solid rgba(16, 185, 129, 0.25) !important;
 }
 
 .trust-badge-icon.cloud-badge {
-  background: rgba(2, 132, 199, 0.14) !important;
+  background: rgba(2, 132, 199, 0.12) !important;
   color: #0284c7 !important;
-  border: 1px solid rgba(2, 132, 199, 0.3) !important;
+  border: 1px solid rgba(2, 132, 199, 0.25) !important;
 }
 
 .trust-badge-icon.wa-badge {
-  background: rgba(22, 163, 74, 0.14) !important;
+  background: rgba(22, 163, 74, 0.12) !important;
   color: #16a34a !important;
-  border: 1px solid rgba(22, 163, 74, 0.3) !important;
+  border: 1px solid rgba(22, 163, 74, 0.25) !important;
 }
 
 .trust-badge-icon.speed-badge {
-  background: rgba(245, 158, 11, 0.14) !important;
+  background: rgba(245, 158, 11, 0.12) !important;
   color: #d97706 !important;
-  border: 1px solid rgba(245, 158, 11, 0.3) !important;
+  border: 1px solid rgba(245, 158, 11, 0.25) !important;
 }
 
 .trust-badge-content {
   display: flex !important;
   flex-direction: column !important;
-  gap: 2px !important;
+  gap: 1px !important;
   min-width: 0 !important;
+  overflow: hidden !important;
 }
 
 .trust-badge-content .trust-title {
-  font-size: 11.5px !important;
-  font-weight: 800 !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
   color: #0f172a !important;
-  letter-spacing: 0.3px !important;
+  letter-spacing: 0.2px !important;
   text-transform: uppercase !important;
   white-space: nowrap !important;
   overflow: hidden !important;
@@ -7477,7 +7638,7 @@ section.content-view.hidden {
 }
 
 .trust-badge-content .trust-sub {
-  font-size: 11px !important;
+  font-size: 10px !important;
   font-weight: 500 !important;
   color: #64748b !important;
   white-space: nowrap !important;

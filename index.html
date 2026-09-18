@@ -69,7 +69,7 @@
       } catch (e) {}
     }
     // Build Version Enforcement: Clears stale caches when new build is deployed
-    window.__APP_BUILD_VERSION__ = "v401_fix_invoice_deletion_and_history_persistence";
+    window.__APP_BUILD_VERSION__ = "v403_whatsapp_reliability_qr_hardened";
     try {
       const storedBuild = localStorage.getItem("aaryan_app_build_version");
       if (storedBuild !== window.__APP_BUILD_VERSION__) {
@@ -84,7 +84,7 @@
   <link rel="preconnect" href="https://script.google.com" crossorigin>
   <link rel="dns-prefetch" href="https://script.google.com">
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="index.css?v=397_guaranteed_pdf_delivery">
+  <link rel="stylesheet" href="index.css?v=402_dashboard_layout_reorganized">
   <script src="invoice_utils_v5.js?v=338_paid_reminder_symbol_fix"></script>
 </head>
 <body>
@@ -220,34 +220,41 @@
             <i class="fa-solid fa-triangle-exclamation"></i>
             <span id="low-stock-count-text">0 Low Stock</span>
           </div>
-          <div id="live-cloud-sync-badge" class="cloud-sync-pill synced cursor-pointer" onclick="openDatabaseTelemetryModal()" title="1-Second Continuous Google Database Auto-Sync (Click for Telemetry HUD)">
-            <span class="realtime-radar-dot active" id="sync-radar-dot"></span>
-            <i class="fa-solid fa-cloud" style="color: #10b981;"></i>
-            <span id="sync-status-text">🟢 1s Google DB • Live</span>
+          <div class="header-meta-group">
+            <div id="live-cloud-sync-badge" class="cloud-sync-pill synced cursor-pointer" onclick="openDatabaseTelemetryModal()" title="1-Second Continuous Google Database Auto-Sync (Click for Telemetry HUD)">
+              <span class="realtime-radar-dot active" id="sync-radar-dot"></span>
+              <i class="fa-solid fa-cloud" style="color: #10b981;"></i>
+              <span id="sync-status-text">🟢 1s Google DB • Live</span>
+            </div>
+            <div id="live-whatsapp-pill" class="whatsapp-sync-pill connected cursor-pointer" onclick="openWhatsAppBotModal()" title="WhatsApp Bot Connected (+918367047947)">
+              <span class="radar-dot" id="wa-radar-indicator"></span>
+              <i class="fa-brands fa-whatsapp" id="wa-bot-status-icon" style="color: #16a34a;"></i>
+              <span id="wa-bot-status-text">WhatsApp</span>
+            </div>
+            <div id="live-telegram-pill" class="telegram-sync-pill connected cursor-pointer" onclick="openTelegramBotModal()" title="Telegram Bot Connected (@fishbilling_bot_bot)">
+              <span class="radar-dot tg-dot"></span>
+              <i class="fa-brands fa-telegram" style="color: #0284c7;"></i>
+              <span id="tg-bot-status-text">Telegram</span>
+            </div>
           </div>
-          <div id="live-whatsapp-pill" class="whatsapp-sync-pill connected cursor-pointer" onclick="openWhatsAppBotModal()" title="WhatsApp Bot Connected (+918367047947)">
-            <span class="radar-dot" id="wa-radar-indicator"></span>
-            <i class="fa-brands fa-whatsapp" id="wa-bot-status-icon" style="color: #16a34a;"></i>
-            <span id="wa-bot-status-text">WhatsApp</span>
+          <div class="header-tools-group">
+            <div id="live-data-share-pill" class="data-share-pill cursor-pointer" onclick="openDataSharingModal()" title="Advanced Data Sharing & P2P Quick Sync">
+              <i class="fa-solid fa-share-nodes" style="color: #0284c7;"></i>
+              <span id="data-share-pill-text">Share</span>
+            </div>
+            <div id="live-calculator-pill" class="calc-pill cursor-pointer" onclick="toggleQuickCalculator()" title="Quick Calculator & Fast Bill Injection (Alt+C)">
+              <i class="fa-solid fa-calculator" style="color: #38bdf8;"></i>
+              <span>Calc <kbd>Alt+C</kbd></span>
+            </div>
+            <div id="live-audio-fx-pill" class="audio-fx-pill active cursor-pointer" onclick="toggleAudioFeedback()" title="Billing Audio FX (Click to Mute / Unmute)">
+              <i class="fa-solid fa-volume-high" id="audio-fx-icon"></i>
+              <span id="audio-fx-text">Audio</span>
+            </div>
           </div>
-          <div id="live-telegram-pill" class="telegram-sync-pill connected cursor-pointer" onclick="openTelegramBotModal()" title="Telegram Bot Connected (@fishbilling_bot_bot)">
-            <span class="radar-dot tg-dot"></span>
-            <i class="fa-brands fa-telegram" style="color: #0284c7;"></i>
-            <span id="tg-bot-status-text">Telegram</span>
+          <div class="header-clock-pill">
+            <i class="fa-regular fa-clock text-cyan" style="font-size: 11px;"></i>
+            <span id="current-datetime"></span>
           </div>
-          <div id="live-data-share-pill" class="data-share-pill cursor-pointer" onclick="openDataSharingModal()" title="Advanced Data Sharing & P2P Quick Sync">
-            <i class="fa-solid fa-share-nodes" style="color: #0284c7;"></i>
-            <span id="data-share-pill-text">Share Data</span>
-          </div>
-          <div id="live-calculator-pill" class="calc-pill cursor-pointer" onclick="toggleQuickCalculator()" title="Quick Calculator & Fast Bill Injection (Alt+C)">
-            <i class="fa-solid fa-calculator" style="color: #38bdf8;"></i>
-            <span>Calc <kbd>Alt+C</kbd></span>
-          </div>
-          <div id="live-audio-fx-pill" class="audio-fx-pill active cursor-pointer" onclick="toggleAudioFeedback()" title="Billing Audio FX (Click to Mute / Unmute)">
-            <i class="fa-solid fa-volume-high" id="audio-fx-icon"></i>
-            <span id="audio-fx-text">Audio</span>
-          </div>
-          <span id="current-datetime"></span>
         </div>
       </header>
 
@@ -270,16 +277,16 @@
               <i class="fa-solid fa-plus"></i> New GST Bill
             </button>
             <button class="btn btn-secondary btn-hero" onclick="openBarcodeScannerModal()" title="Scan or Upload Bill QR / Barcode to Settle Payment">
-              <i class="fa-solid fa-qrcode"></i> Scan / Upload QR
+              <i class="fa-solid fa-qrcode"></i> Scan QR
             </button>
             <button class="btn btn-secondary btn-hero" onclick="switchTab('products')">
               <i class="fa-solid fa-cubes"></i> Add Product
             </button>
             <button class="btn btn-secondary btn-hero" onclick="switchTab('reports')">
-              <i class="fa-solid fa-chart-pie"></i> View Reports
+              <i class="fa-solid fa-chart-pie"></i> Reports
             </button>
-            <button class="btn btn-cyan btn-hero" id="dashboard-fit-toggle-btn" onclick="toggleDashboardScreenFit()" title="Toggle View Mode (Dynamic Screen-Fit Active)">
-              <i class="fa-solid fa-expand" id="dashboard-fit-icon"></i> <span id="dashboard-fit-label">Fitted View</span>
+            <button class="btn btn-secondary btn-hero" id="dashboard-fit-toggle-btn" onclick="toggleDashboardScreenFit()" title="Toggle Compact / Full View Mode">
+              <i class="fa-solid fa-expand" id="dashboard-fit-icon"></i> <span id="dashboard-fit-label">Fit Screen</span>
             </button>
           </div>
         </div>
@@ -288,7 +295,7 @@
         <div class="enterprise-trust-strip margin-top-12">
           <div class="trust-badge-item">
             <div class="trust-badge-icon gst-badge">
-              <i class="fa-solid fa-shield-check"></i>
+              <i class="fa-solid fa-shield-halved"></i>
             </div>
             <div class="trust-badge-content">
               <span class="trust-title">GST Registered Enterprise</span>
@@ -324,30 +331,21 @@
           </div>
         </div>
 
-        <!-- Metric Stat Cards -->
+        <!-- Metric Stat Cards (Organized: Row 1 Financials, Row 2 Operations) -->
         <div class="stats-grid margin-top-12">
-          <div class="stat-card">
-            <div class="stat-icon bg-teal-light">
-              <i class="fa-solid fa-file-invoice-dollar text-teal"></i>
-            </div>
-            <div class="stat-details">
-              <span class="stat-label">TOTAL INVOICES</span>
-              <h3 id="stat-total-invoices">3</h3>
-              <span class="stat-trend text-teal"><i class="fa-solid fa-arrow-trend-up"></i> Live Invoices</span>
-            </div>
-          </div>
-
+          <!-- 1. Total Billing Volume -->
           <div class="stat-card">
             <div class="stat-icon bg-green-light">
               <i class="fa-solid fa-indian-rupee-sign text-green"></i>
             </div>
             <div class="stat-details">
               <span class="stat-label">TOTAL BILLING VOLUME</span>
-              <h3 id="stat-total-amount">₹ 85,725.00</h3>
+              <h3 id="stat-total-amount">₹ 0.00</h3>
               <span class="stat-trend text-green"><i class="fa-solid fa-circle-check"></i> Gross Sales</span>
             </div>
           </div>
 
+          <!-- 2. Payments Received -->
           <div class="stat-card">
             <div class="stat-icon bg-emerald-light" style="background: rgba(16, 185, 129, 0.12);">
               <i class="fa-solid fa-hand-holding-dollar" style="color: #059669;"></i>
@@ -359,6 +357,7 @@
             </div>
           </div>
 
+          <!-- 3. Outstanding Balance -->
           <div class="stat-card">
             <div class="stat-icon bg-amber-light" style="background: rgba(245, 158, 11, 0.12);">
               <i class="fa-solid fa-hourglass-half" style="color: #d97706;"></i>
@@ -370,28 +369,7 @@
             </div>
           </div>
 
-          <div class="stat-card">
-            <div class="stat-icon bg-cyan-light">
-              <i class="fa-solid fa-cubes text-cyan"></i>
-            </div>
-            <div class="stat-details">
-              <span class="stat-label">ACTIVE PRODUCTS</span>
-              <h3 id="stat-total-products">3</h3>
-              <span class="stat-trend text-cyan"><i class="fa-solid fa-boxes-stacked"></i> Catalog Items</span>
-            </div>
-          </div>
-
-          <div class="stat-card">
-            <div class="stat-icon bg-purple-light">
-              <i class="fa-solid fa-users text-purple"></i>
-            </div>
-            <div class="stat-details">
-              <span class="stat-label">SAVED PARTIES</span>
-              <h3 id="stat-total-parties">1</h3>
-              <span class="stat-trend text-purple"><i class="fa-solid fa-user-check"></i> Registered Clients</span>
-            </div>
-          </div>
-
+          <!-- 4. Est. Gross Profit -->
           <div class="stat-card">
             <div class="stat-icon bg-emerald-light" style="background: rgba(16, 185, 129, 0.12);">
               <i class="fa-solid fa-chart-line" style="color: #10b981;"></i>
@@ -403,6 +381,43 @@
             </div>
           </div>
 
+          <!-- 5. Total Invoices -->
+          <div class="stat-card">
+            <div class="stat-icon bg-teal-light">
+              <i class="fa-solid fa-file-invoice-dollar text-teal"></i>
+            </div>
+            <div class="stat-details">
+              <span class="stat-label">TOTAL INVOICES</span>
+              <h3 id="stat-total-invoices">0</h3>
+              <span class="stat-trend text-teal"><i class="fa-solid fa-arrow-trend-up"></i> Live Invoices</span>
+            </div>
+          </div>
+
+          <!-- 6. Active Products -->
+          <div class="stat-card">
+            <div class="stat-icon bg-cyan-light">
+              <i class="fa-solid fa-cubes text-cyan"></i>
+            </div>
+            <div class="stat-details">
+              <span class="stat-label">ACTIVE PRODUCTS</span>
+              <h3 id="stat-total-products">0</h3>
+              <span class="stat-trend text-cyan"><i class="fa-solid fa-boxes-stacked"></i> Catalog Items</span>
+            </div>
+          </div>
+
+          <!-- 7. Saved Parties -->
+          <div class="stat-card">
+            <div class="stat-icon bg-purple-light">
+              <i class="fa-solid fa-users text-purple"></i>
+            </div>
+            <div class="stat-details">
+              <span class="stat-label">SAVED PARTIES</span>
+              <h3 id="stat-total-parties">0</h3>
+              <span class="stat-trend text-purple"><i class="fa-solid fa-user-check"></i> Registered Clients</span>
+            </div>
+          </div>
+
+          <!-- 8. Settlement Rate -->
           <div class="stat-card">
             <div class="stat-icon bg-teal-light" style="background: rgba(14, 165, 233, 0.12);">
               <i class="fa-solid fa-receipt text-teal" style="color: #0284c7;"></i>
@@ -417,21 +432,21 @@
 
         <!-- Live Analytics & Revenue Charts Grid -->
         <div class="analytics-charts-grid">
-          <div class="card-box" style="margin-top: 0;">
+          <div class="card-box chart-card" style="margin-top: 0;">
             <div class="card-box-header">
-              <h3><i class="fa-solid fa-chart-area text-cyan"></i> Monthly Sales & Revenue Trend</h3>
+              <h3><i class="fa-solid fa-chart-area text-cyan"></i> Monthly Sales &amp; Revenue Trend</h3>
               <span class="badge-status badge-paid">Live Analytics</span>
             </div>
-            <div class="chart-canvas-container" style="position: relative; padding: 4px 6px;">
+            <div class="chart-canvas-container">
               <canvas id="dashboard-sales-chart"></canvas>
             </div>
           </div>
-          <div class="card-box" style="margin-top: 0;">
+          <div class="card-box chart-card" style="margin-top: 0;">
             <div class="card-box-header">
               <h3><i class="fa-solid fa-chart-pie text-emerald"></i> GST Tax Breakdown</h3>
               <span class="badge-status badge-paid">Tax Analytics</span>
             </div>
-            <div class="chart-canvas-container" style="position: relative; padding: 4px 6px;">
+            <div class="chart-canvas-container">
               <canvas id="dashboard-gst-chart"></canvas>
             </div>
           </div>
@@ -440,71 +455,36 @@
         <!-- Recent Invoices Table Card -->
         <div class="card-box margin-top-12">
           <div class="card-box-header">
-            <h3><i class="fa-solid fa-clock-rotate-left"></i> Recent Invoices & Billing Logs</h3>
-            <button class="btn btn-secondary" onclick="switchTab('billing')">
-              <i class="fa-solid fa-plus"></i> New Invoice
-            </button>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <h3><i class="fa-solid fa-clock-rotate-left text-cyan"></i> Recent Invoices &amp; Billing Logs</h3>
+              <span class="badge-status badge-paid">Latest Activity</span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <button class="btn btn-secondary btn-sm" onclick="switchTab('invoices')" title="View all invoices in Invoice History">
+                <i class="fa-solid fa-list"></i> Full History
+              </button>
+              <button class="btn btn-cyan btn-sm" onclick="switchTab('billing')" title="Create a new GST Invoice">
+                <i class="fa-solid fa-plus"></i> New Bill
+              </button>
+            </div>
           </div>
           <div class="table-responsive">
             <table class="dashboard-table">
               <thead>
                 <tr>
-                  <th style="width: 90px;">INVOICE #</th>
+                  <th style="width: 95px;">INVOICE #</th>
                   <th style="width: 110px;">DATE</th>
                   <th>CUSTOMER</th>
                   <th style="width: 65px; text-align: center;">ITEMS</th>
                   <th style="width: 125px; text-align: right;">TOTAL</th>
                   <th style="width: 95px; text-align: center;">STATUS</th>
-                  <th style="width: 200px; text-align: center;">ACTIONS</th>
+                  <th style="width: 220px; text-align: center;">ACTIONS</th>
                 </tr>
               </thead>
               <tbody id="dashboard-recent-invoices-body">
                 <tr>
-                  <td style="font-weight: 700; color: var(--primary-teal);">#0003</td>
-                  <td>11-Sept-2026</td>
-                  <td style="font-weight: 600;">DEVI FISHERIES LIMITED</td>
-                  <td class="text-center">2</td>
-                  <td style="text-align: right; font-weight: 700;">₹ 62,730.00</td>
-                  <td class="text-center"><span class="badge-status badge-unpaid">Unpaid</span></td>
-                  <td class="actions-cell">
-                    <button class="action-btn edit" onclick="editSavedInvoice('inv_1789124481510_975')" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>
-                    <button class="action-btn print" onclick="printSavedInvoice('inv_1789124481510_975')" title="Print A4"><i class="fa-solid fa-print"></i></button>
-                    <button class="action-btn print" onclick="printSavedInvoiceThermal('inv_1789124481510_975')" title="Print Thermal POS"><i class="fa-solid fa-receipt"></i></button>
-                    <button class="action-btn share btn-whatsapp" onclick="shareInvoiceToWhatsApp('inv_1789124481510_975', this)" title="Share PDF via WhatsApp"><i class="fa-brands fa-whatsapp" style="color: #16a34a;"></i></button>
-                    <button class="action-btn share btn-telegram" onclick="shareInvoiceToTelegram('inv_1789124481510_975', this)" title="Share PDF to Telegram"><i class="fa-brands fa-telegram" style="color: #0284c7;"></i></button>
-                    <button class="action-btn delete" onclick="deleteSavedInvoice('inv_1789124481510_975')" title="Delete"><i class="fa-solid fa-trash"></i></button>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="font-weight: 700; color: var(--primary-teal);">#0002</td>
-                  <td>11-Sept-2026</td>
-                  <td style="font-weight: 600;">DEVI FISHERIES LIMITED</td>
-                  <td class="text-center">2</td>
-                  <td style="text-align: right; font-weight: 700;">₹ 10,395.00</td>
-                  <td class="text-center"><span class="badge-status badge-unpaid">Unpaid</span></td>
-                  <td class="actions-cell">
-                    <button class="action-btn edit" onclick="editSavedInvoice('inv_1789115952504_350')" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>
-                    <button class="action-btn print" onclick="printSavedInvoice('inv_1789115952504_350')" title="Print A4"><i class="fa-solid fa-print"></i></button>
-                    <button class="action-btn print" onclick="printSavedInvoiceThermal('inv_1789115952504_350')" title="Print Thermal POS"><i class="fa-solid fa-receipt"></i></button>
-                    <button class="action-btn share btn-whatsapp" onclick="shareInvoiceToWhatsApp('inv_1789115952504_350', this)" title="Share PDF via WhatsApp"><i class="fa-brands fa-whatsapp" style="color: #16a34a;"></i></button>
-                    <button class="action-btn share btn-telegram" onclick="shareInvoiceToTelegram('inv_1789115952504_350', this)" title="Share PDF to Telegram"><i class="fa-brands fa-telegram" style="color: #0284c7;"></i></button>
-                    <button class="action-btn delete" onclick="deleteSavedInvoice('inv_1789115952504_350')" title="Delete"><i class="fa-solid fa-trash"></i></button>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="font-weight: 700; color: var(--primary-teal);">#0001</td>
-                  <td>11-Sept-2026</td>
-                  <td style="font-weight: 600;">DEVI FISHERIES LIMITED</td>
-                  <td class="text-center">1</td>
-                  <td style="text-align: right; font-weight: 700;">₹ 12,600.00</td>
-                  <td class="text-center"><span class="badge-status badge-partial">Partial</span></td>
-                  <td class="actions-cell">
-                    <button class="action-btn edit" onclick="editSavedInvoice('inv_1789114669169_340')" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>
-                    <button class="action-btn print" onclick="printSavedInvoice('inv_1789114669169_340')" title="Print A4"><i class="fa-solid fa-print"></i></button>
-                    <button class="action-btn print" onclick="printSavedInvoiceThermal('inv_1789114669169_340')" title="Print Thermal POS"><i class="fa-solid fa-receipt"></i></button>
-                    <button class="action-btn share btn-whatsapp" onclick="shareInvoiceToWhatsApp('inv_1789114669169_340', this)" title="Share PDF via WhatsApp"><i class="fa-brands fa-whatsapp" style="color: #16a34a;"></i></button>
-                    <button class="action-btn share btn-telegram" onclick="shareInvoiceToTelegram('inv_1789114669169_340', this)" title="Share PDF to Telegram"><i class="fa-brands fa-telegram" style="color: #0284c7;"></i></button>
-                    <button class="action-btn delete" onclick="deleteSavedInvoice('inv_1789114669169_340')" title="Delete"><i class="fa-solid fa-trash"></i></button>
+                  <td colspan="7" class="text-center text-muted" style="padding: 24px;">
+                    <i class="fa-solid fa-circle-notch fa-spin"></i> Loading recent invoices...
                   </td>
                 </tr>
               </tbody>
@@ -520,7 +500,7 @@
               <span class="badge-status badge-paid" id="ledger-trust-badge">Verified Balances</span>
             </div>
             <div style="display: flex; gap: 8px;">
-              <button class="btn btn-secondary" onclick="switchTab('parties')" title="Manage all customers and parties">
+              <button class="btn btn-secondary btn-sm" onclick="switchTab('parties')" title="Manage all customers and parties">
                 <i class="fa-solid fa-users"></i> All Parties
               </button>
             </div>
@@ -4193,7 +4173,7 @@
     </button>
   </nav>
 
-  <script src="index_v5.js?v=397_guaranteed_pdf_delivery"></script>
+  <script src="index_v5.js?v=403_whatsapp_reliability_qr_hardened"></script>
 </body>
 </html>
 

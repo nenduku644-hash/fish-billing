@@ -1,6 +1,6 @@
 Set WshShell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
-billingDir = "C:\Users\ADMIN\Documents\fish billing"
+billingDir = fso.GetParentFolderName(WScript.ScriptFullName)
 
 Set oExec = WshShell.Exec("cmd.exe /c netstat -aon | findstr :3001 | findstr LISTENING")
 strOut = oExec.StdOut.ReadAll()

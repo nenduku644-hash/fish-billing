@@ -425,7 +425,6 @@ function getMasterSpreadsheetId() {
   var props = PropertiesService.getScriptProperties();
   return props.getProperty("MASTER_SPREADSHEET_ID");
 }
-var SPREADSHEET_NAME = "Aaryan_Aqua_Live_Master_Sheet";
 
 function getMasterSpreadsheet() {
   var ss = null;
@@ -1089,6 +1088,7 @@ function processDeleteRecord(type, id, user, ss) {
 
 var ALLOWED_ACTIONS = [
   "status",
+  "ping",
   "sync",
   "pull",
   "save_invoice",
@@ -1107,6 +1107,13 @@ function handleApiGet(e) {
     return ContentService.createTextOutput(JSON.stringify({
       ok: false,
       error: "Unknown or unauthorized action: " + action
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  // 0. Ultra-Fast Ping — keeps V8 container warm, zero sheet access (<50ms)
+  if (action === "ping") {
+    return ContentService.createTextOutput(JSON.stringify({
+      ok: true, pong: true, t: Date.now()
     })).setMimeType(ContentService.MimeType.JSON);
   }
 

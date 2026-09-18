@@ -13,7 +13,8 @@ const WA_ACK_TOPIC = 'aaryan_aqua_gst_billing_2026/whatsapp_ack';
 let mqttBridgeClient = null;
 
 process.on('uncaughtException', (err) => {
-  if (err && err.message && (err.message.includes('Execution context was destroyed') || err.message.includes('Target closed') || err.message.includes('Session closed'))) {
+  const msg = err?.message || String(err);
+  if (msg.includes('Execution context was destroyed') || msg.includes('Target closed') || msg.includes('Session closed') || msg.includes('detached Frame')) {
     console.log('🔄 Handled WhatsApp Web navigation state change safely.');
     return;
   }
@@ -22,7 +23,7 @@ process.on('uncaughtException', (err) => {
 
 process.on('unhandledRejection', (reason) => {
   const msg = reason?.message || String(reason);
-  if (msg.includes('Execution context was destroyed') || msg.includes('Target closed') || msg.includes('Session closed')) {
+  if (msg.includes('Execution context was destroyed') || msg.includes('Target closed') || msg.includes('Session closed') || msg.includes('detached Frame')) {
     console.log('🔄 Handled WhatsApp Web navigation state change safely.');
     return;
   }
@@ -54,6 +55,11 @@ let errorMessage = null;
 let isInitializing = false;
 let qrTimestamp = null;
 let activityLogs = [];
+
+const dataDir = path.join(__dirname, 'data');
+if (!fs.existsSync(dataDir)) {
+  try { fs.mkdirSync(dataDir, { recursive: true }); } catch (e) {}
+}
 
 const authPath = path.join(__dirname, 'data', '.wwebjs_auth');
 const logsPath = path.join(__dirname, 'data', 'whatsapp_logs.json');
@@ -184,8 +190,7 @@ async function handleDisconnect() {
 function initMqttBridge() {
   const brokers = [
     'wss://test.mosquitto.org:8081/mqtt',
-    'wss://broker.emqx.io:8084/mqtt',
-    'wss://broker.hivemq.com:8884/mqtt'
+    'ws://test.mosquitto.org:8080/mqtt'
   ];
   let brokerIdx = 0;
   let reconnectTimer = null;
@@ -238,7 +243,8 @@ function initMqttBridge() {
           if (mqttBridgeClient && mqttBridgeClient.connected) {
             broadcastStatus();
           } else {
-            scheduleReconnect();
+            clearInterval(global.waHeartbeatInterval);
+            global.waHeartbeatInterval = null;
           }
         }, 8000);
       }
@@ -248,18 +254,10 @@ function initMqttBridge() {
       if (topic === WA_COMMANDS_TOPIC) {
         try {
           const cmd = JSON.parse(message.toString());
-          console.log('📨 Received WhatsApp Cloud Command from Netlify:', cmd.command || cmd.action);
+          console.log('📨 Received WhatsApp Cloud Command:', cmd.command || cmd.action);
 
           if (cmd.command === 'refresh_qr' || cmd.action === 'refresh_qr') {
-            if (status === 'QR_READY' && client && client.pupPage && !client.pupPage.isClosed()) {
-              console.log('🔄 Reloading WhatsApp Web page for fresh QR code...');
-              try {
-                await client.pupPage.reload({ waitUntil: 'networkidle0' }).catch(() => {});
-                return;
-              } catch (e) {
-                console.warn('Page reload failed, fallback to full re-init:', e.message);
-              }
-            }
+            console.log('🔄 Remote refresh QR requested...');
             initClient({ forceClean: false });
           } else if (cmd.command === 'pair_code' || cmd.action === 'pair_code') {
             if (cmd.phone) {
@@ -270,13 +268,16 @@ function initMqttBridge() {
             broadcastStatus();
           } else if (cmd.command === 'disconnect' || cmd.action === 'disconnect') {
             await handleDisconnect();
+          } else if (cmd.command === 'restart' || cmd.action === 'restart') {
+            console.log('🔄 Remote restart requested with session preserved...');
+            initClient({ forceRestart: true });
           } else if (cmd.command === 'send_message' || cmd.action === 'send_message') {
             if (status === 'CONNECTED' && client && cmd.phone && cmd.text) {
               const chatId = formatPhone(cmd.phone);
               if (chatId) {
                 console.log(`💬 Sending WhatsApp Message via Cloud Mesh to +${cmd.phone}...`);
                 try {
-                  await client.sendMessage(chatId, cmd.text);
+                  await safeClientSendMessage(chatId, cmd.text);
                   logActivity({ type: 'MESSAGE', phone: cmd.phone, status: 'SENT' });
                   console.log(`✅ WhatsApp Message delivered to +${cmd.phone}!`);
                   if (mqttBridgeClient && mqttBridgeClient.connected) {
@@ -299,6 +300,26 @@ function initMqttBridge() {
                     }));
                   }
                 }
+              } else {
+                if (mqttBridgeClient && mqttBridgeClient.connected) {
+                  mqttBridgeClient.publish(WA_ACK_TOPIC, JSON.stringify({
+                    commandId: cmd.commandId || cmd.timestamp,
+                    phone: cmd.phone,
+                    status: 'FAILED',
+                    error: 'Invalid phone number format: ' + cmd.phone,
+                    timestamp: Date.now()
+                  }));
+                }
+              }
+            } else {
+              if (mqttBridgeClient && mqttBridgeClient.connected) {
+                mqttBridgeClient.publish(WA_ACK_TOPIC, JSON.stringify({
+                  commandId: cmd.commandId || cmd.timestamp,
+                  phone: cmd.phone,
+                  status: 'FAILED',
+                  error: 'Bot not ready (status: ' + status + ')',
+                  timestamp: Date.now()
+                }));
               }
             }
           } else if (cmd.command === 'send_invoice' || cmd.action === 'send_invoice') {
@@ -310,11 +331,11 @@ function initMqttBridge() {
                   if (cmd.pdfBase64) {
                     const cleanB64 = String(cmd.pdfBase64).replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
                     const media = new MessageMedia('application/pdf', cleanB64, cmd.filename || 'Invoice.pdf');
-                    await client.sendMessage(chatId, media, { caption: sanitizeCaption(cmd.text || cmd.caption || ''), sendMediaAsDocument: true });
+                    await safeClientSendMessage(chatId, media, { caption: sanitizeCaption(cmd.text || cmd.caption || ''), sendMediaAsDocument: true });
                     console.log(`📄 WhatsApp Invoice (WITH PDF) delivered to +${cmd.phone}!`);
                   } else if (cmd.text) {
-                    await client.sendMessage(chatId, cmd.text);
-                    console.log(`💬 WhatsApp Invoice (TEXT ONLY, PDF STRIPPED) delivered to +${cmd.phone}!`);
+                    await safeClientSendMessage(chatId, cmd.text);
+                    console.log(`💬 WhatsApp Invoice (TEXT ONLY) delivered to +${cmd.phone}!`);
                   }
                   logActivity({ type: 'INVOICE_PDF', phone: cmd.phone, filename: cmd.filename, status: 'SENT' });
                   if (mqttBridgeClient && mqttBridgeClient.connected) {
@@ -337,6 +358,26 @@ function initMqttBridge() {
                     }));
                   }
                 }
+              } else {
+                if (mqttBridgeClient && mqttBridgeClient.connected) {
+                  mqttBridgeClient.publish(WA_ACK_TOPIC, JSON.stringify({
+                    commandId: cmd.commandId || cmd.timestamp,
+                    phone: cmd.phone,
+                    status: 'FAILED',
+                    error: 'Invalid phone number format: ' + cmd.phone,
+                    timestamp: Date.now()
+                  }));
+                }
+              }
+            } else {
+              if (mqttBridgeClient && mqttBridgeClient.connected) {
+                mqttBridgeClient.publish(WA_ACK_TOPIC, JSON.stringify({
+                  commandId: cmd.commandId || cmd.timestamp,
+                  phone: cmd.phone,
+                  status: 'FAILED',
+                  error: 'Bot not ready (status: ' + status + ')',
+                  timestamp: Date.now()
+                }));
               }
             }
           }
@@ -416,9 +457,24 @@ function sanitizeCaption(str) {
   return trimmed;
 }
 
+function getChromeVersion() {
+  try {
+    const cp = findChromeExecutable();
+    if (cp && process.platform === 'win32') {
+      const { execSync } = require('child_process');
+      const out = execSync(`powershell -NoProfile -Command "(Get-Item '${cp}').VersionInfo.ProductVersion"`, { timeout: 2500 }).toString().trim();
+      if (out && /^\d+/.test(out)) return out;
+    }
+  } catch (e) {}
+  return '153.0.8010.48';
+}
+
 function findChromeExecutable() {
   const candidates = [
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
     path.join(process.env.USERPROFILE || 'C:\\Users\\ADMIN', '.cache', 'puppeteer', 'chrome', 'win64-146.0.7680.31', 'chrome-win64', 'chrome.exe'),
     process.env.PUPPETEER_EXECUTABLE_PATH,
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
@@ -430,9 +486,33 @@ function findChromeExecutable() {
   return undefined;
 }
 
+async function safeClientSendMessage(chatId, content, options = {}) {
+  if (!client) throw new Error('WhatsApp bot client is not initialized');
+  try {
+    return await client.sendMessage(chatId, content, options);
+  } catch (err) {
+    const errMsg = err?.message || String(err);
+    if (errMsg.includes('detached Frame') || errMsg.includes('Execution context was destroyed') || errMsg.includes('Target closed') || errMsg.includes('Session closed')) {
+      console.warn('⚠️ WhatsApp Web Puppeteer frame detached. Attempting live page reload recovery...', errMsg);
+      if (client && client.pupPage && !client.pupPage.isClosed()) {
+        try {
+          await client.pupPage.reload({ waitUntil: 'networkidle0', timeout: 25000 });
+          await new Promise(r => setTimeout(r, 2000));
+          return await client.sendMessage(chatId, content, options);
+        } catch (reloadErr) {
+          console.warn('Live page reload recovery failed, restarting engine with preserved session...', reloadErr.message);
+        }
+      }
+      // Re-initialize client without wiping auth session
+      initClient({ forceRestart: true });
+    }
+    throw err;
+  }
+}
+
 async function initClient(options = {}) {
-  const { forceClean = false, pairPhone = null, retryCount = 0 } = options;
-  if (status === 'CONNECTED' && !forceClean) return getStatus();
+  const { forceClean = false, forceRestart = false, pairPhone = null, retryCount = 0 } = options;
+  if (status === 'CONNECTED' && !forceClean && !forceRestart) return getStatus();
   if (isInitializing) return getStatus();
 
   isInitializing = true;
@@ -478,6 +558,7 @@ async function initClient(options = {}) {
     }
 
     const chromePath = findChromeExecutable();
+    const chromeVer = getChromeVersion();
     const puppeteerArgs = [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -486,7 +567,8 @@ async function initClient(options = {}) {
       '--no-first-run',
       '--no-zygote',
       '--disable-gpu',
-      '--disable-blink-features=AutomationControlled'
+      '--disable-blink-features=AutomationControlled',
+      '--disable-features=IsolateOrigins,site-per-process'
     ];
 
     const puppeteerConfig = {
@@ -499,7 +581,7 @@ async function initClient(options = {}) {
 
     const clientConfig = {
       authStrategy: new LocalAuth({ dataPath: authPath }),
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`,
       webVersionCache: {
         type: 'none'
       },
@@ -580,6 +662,8 @@ async function initClient(options = {}) {
       errorMessage = msg || 'Authentication failed';
       isInitializing = false;
       broadcastStatus();
+      console.log('🧹 Cleaning invalid auth session and restarting for fresh QR in 3 seconds...');
+      setTimeout(() => initClient({ forceClean: true }), 3000);
     });
 
     client.on('disconnected', (reason) => {
@@ -589,8 +673,9 @@ async function initClient(options = {}) {
       isInitializing = false;
       logActivity({ type: 'STATUS', status: 'DISCONNECTED', desc: reason });
       broadcastStatus();
-      console.log('🔄 Attempting automatic reconnection in 5 seconds...');
-      setTimeout(() => initClient(), 5000);
+      const shouldClean = (reason === 'LOGOUT' || reason === 'NAVIGATION' || !reason);
+      console.log(`🔄 Attempting automatic reconnection in 4 seconds (clean: ${shouldClean})...`);
+      setTimeout(() => initClient({ forceClean: shouldClean }), 4000);
     });
 
     await client.initialize();
@@ -637,12 +722,6 @@ app.post('/api/whatsapp/connect', async (req, res) => {
 
 app.post('/api/whatsapp/refresh-qr', async (req, res) => {
   console.log('🔄 Refreshing WhatsApp QR Code...');
-  if (status === 'QR_READY' && client && client.pupPage && !client.pupPage.isClosed()) {
-    try {
-      await client.pupPage.reload({ waitUntil: 'networkidle0' }).catch(() => {});
-      return res.json({ ok: true, message: 'QR reloaded', ...getStatus() });
-    } catch (e) {}
-  }
   initClient({ forceClean: false });
   res.json({ ok: true, message: 'Refreshing QR code', ...getStatus() });
 });
@@ -659,6 +738,12 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/api/whatsapp/restart', async (req, res) => {
+  console.log('🔄 Restarting WhatsApp Bot engine with session preserved...');
+  initClient({ forceRestart: true });
+  res.json({ ok: true, message: 'Restarting WhatsApp engine with session preserved' });
+});
+
 app.post('/api/whatsapp/send-message', async (req, res) => {
   const { phone, text } = req.body;
   if (status !== 'CONNECTED' || !client) {
@@ -668,7 +753,7 @@ app.post('/api/whatsapp/send-message', async (req, res) => {
   if (!chatId) return res.status(400).json({ ok: false, error: 'Invalid phone number' });
 
   try {
-    const result = await client.sendMessage(chatId, text);
+    const result = await safeClientSendMessage(chatId, text);
     logActivity({ type: 'MESSAGE', phone, status: 'SENT' });
     res.json({ ok: true, messageId: result?.id?._serialized || 'sent' });
   } catch (err) {
@@ -688,9 +773,9 @@ app.post('/api/whatsapp/send-invoice', async (req, res) => {
     if (pdfBase64) {
       const cleanB64 = String(pdfBase64).replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
       const media = new MessageMedia('application/pdf', cleanB64, filename || 'Invoice.pdf');
-      await client.sendMessage(chatId, media, { caption: sanitizeCaption(text || req.body.caption || ''), sendMediaAsDocument: true });
+      await safeClientSendMessage(chatId, media, { caption: sanitizeCaption(text || req.body.caption || ''), sendMediaAsDocument: true });
     } else {
-      await client.sendMessage(chatId, text);
+      await safeClientSendMessage(chatId, text);
     }
     logActivity({ type: 'INVOICE_PDF', phone, filename, status: 'SENT' });
     res.json({ ok: true });
@@ -755,7 +840,7 @@ app.post('/api/sync/push', (req, res) => {
     if (action === 'delete_record') {
       if (payload?.type === 'invoice' || type === 'invoice') {
         let invs = fs.existsSync(invoicesPath) ? JSON.parse(fs.readFileSync(invoicesPath, 'utf8') || '[]') : [];
-        const delId = String(payload.id || id || '').trim().toLowerCase();
+        const delId = String(payload?.id || payload?.recordId || '').trim().toLowerCase();
         const delNo = String(payload.invoiceNo || '').trim().toLowerCase();
         invs = invs.filter(i => {
           if (!i) return false;

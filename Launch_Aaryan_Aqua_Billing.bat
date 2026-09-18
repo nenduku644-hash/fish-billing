@@ -24,6 +24,8 @@ if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" (
     start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --app=http://localhost:3001
 ) else if exist "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" (
     start "" "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" --app=http://localhost:3001
+) else if exist "C:\Program Files\Microsoft\Edge\Application\msedge.exe" (
+    start "" "C:\Program Files\Microsoft\Edge\Application\msedge.exe" --app=http://localhost:3001
 ) else if exist "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" (
     start "" "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --app=http://localhost:3001
 ) else (

@@ -80,10 +80,17 @@ const ALLOWED_UI_SESSION_KEYS = new Set([
   };
 })();
 
-productsDb = [];
-partiesDb = [];
-invoicesDb = [];
-globalSettings = {};
+try {
+  productsDb = JSON.parse(localStorage.getItem("products") || "[]");
+  partiesDb = JSON.parse(localStorage.getItem("parties") || "[]");
+  invoicesDb = JSON.parse(localStorage.getItem("invoices") || "[]");
+  globalSettings = JSON.parse(localStorage.getItem("settings") || "{}");
+} catch(e) {
+  productsDb = [];
+  partiesDb = [];
+  invoicesDb = [];
+  globalSettings = {};
+}
 
   // Persistent Cancelled / Voided Invoices Registry
   window.archiveCancelledInvoice = function(invoiceRecord, reason = "Cancelled") {
@@ -453,13 +460,11 @@ const SYNC_MESH_TOPIC = 'aaryan_aqua_gst_billing_2026/db_sync';
 let realtimeMeshClient = null;
 const MESH_BROKERS = [
   'wss://test.mosquitto.org:8081/mqtt',
-  'wss://broker.emqx.io:8084/mqtt',
-  'wss://broker.hivemq.com:8884/mqtt',
-  'wss://broker-cn.emqx.io:8084/mqtt'
+  'ws://test.mosquitto.org:8080/mqtt'
 ];
 let currentBrokerIdx = 0;
 let meshReconnectTimer = null;
-let activeBrokerName = 'EMQX Ultra-Fast Mesh (<20ms)';
+let activeBrokerName = 'Mosquitto Secure Mesh (<25ms)';
 const processedRealtimeMsgIds = new Set();
 
 function processRealtimeSyncMessage(msg, source = 'mesh') {
@@ -2197,6 +2202,15 @@ function seedDatabasesIfEmpty() {
 }
 
 function loadAllDatabases() {
+  if ((!invoicesDb || invoicesDb.length === 0) && localStorage.getItem("invoices")) {
+    try { invoicesDb = JSON.parse(localStorage.getItem("invoices") || "[]"); } catch(e) {}
+  }
+  if ((!productsDb || productsDb.length === 0) && localStorage.getItem("products")) {
+    try { productsDb = JSON.parse(localStorage.getItem("products") || "[]"); } catch(e) {}
+  }
+  if ((!partiesDb || partiesDb.length === 0) && localStorage.getItem("parties")) {
+    try { partiesDb = JSON.parse(localStorage.getItem("parties") || "[]"); } catch(e) {}
+  }
   window.invoicesDb = invoicesDb;
   window.productsDb = productsDb;
   window.partiesDb = partiesDb;
@@ -2919,6 +2933,109 @@ window.calculateMarginWidget = function() {
   profitResult.textContent = `₹ ${formatCurrency(netProfit)} (${marginPct}%)`;
 };
 
+// --- CUSTOMER OUTSTANDING & TRUST LEDGER SUMMARY ---
+window.startBillForCustomer = function(customerName) {
+  switchTab("billing");
+  if (elements.billBuyerName) {
+    elements.billBuyerName.value = customerName;
+    if (typeof onBuyerNameChange === 'function') onBuyerNameChange();
+    elements.billBuyerName.focus();
+  }
+};
+
+window.renderCustomerLedgerSummary = function() {
+  const tbody = document.getElementById("dashboard-customer-ledger-body");
+  if (!tbody) return;
+
+  const customerMap = new Map();
+
+  (invoicesDb || []).forEach(inv => {
+    if (!inv) return;
+    const isEst = Boolean(inv.isEstimate || inv.details?.isEstimate || String(inv.invoiceNo || "").startsWith("EST-"));
+    if (isEst) return;
+
+    const details = inv.details || {};
+    const buyer = details.buyer || {};
+    const rawName = (inv.customerName || buyer.name || 'Cash Customer').trim();
+    if (!rawName) return;
+
+    const normKey = rawName.toLowerCase();
+    let record = customerMap.get(normKey);
+    if (!record) {
+      record = {
+        name: rawName,
+        phone: buyer.phone || inv.customerPhone || "",
+        invoiceCount: 0,
+        totalBilled: 0,
+        totalPaid: 0,
+        totalBalance: 0
+      };
+      customerMap.set(normKey, record);
+    }
+
+    if (!record.phone && buyer.phone) record.phone = buyer.phone;
+
+    const payInfo = typeof getInvoicePaidAndBalance === "function" 
+      ? getInvoicePaidAndBalance(inv) 
+      : { total: safeParseAmount(inv.total), paid: safeParseAmount(inv.total), balance: 0 };
+
+    record.invoiceCount += 1;
+    record.totalBilled += payInfo.total;
+    record.totalPaid += payInfo.paid;
+    record.totalBalance += payInfo.balance;
+  });
+
+  const customers = Array.from(customerMap.values()).sort((a, b) => {
+    // Prioritize pending balances first, then highest volume
+    if (b.totalBalance !== a.totalBalance) return b.totalBalance - a.totalBalance;
+    return b.totalBilled - a.totalBilled;
+  });
+
+  if (customers.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="7" class="text-center text-muted" style="padding: 24px;">
+          <i class="fa-solid fa-clipboard-check" style="font-size: 20px; color: #10b981; margin-bottom: 6px; display: block;"></i>
+          All customer accounts settled! No outstanding balances.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = customers.map(cust => {
+    const hasBalance = cust.totalBalance > 0.01;
+    const balPill = hasBalance
+      ? `<span class="ledger-balance-pill pending"><i class="fa-solid fa-clock"></i> ₹${formatCurrency(cust.totalBalance)}</span>`
+      : `<span class="ledger-balance-pill cleared"><i class="fa-solid fa-circle-check"></i> Cleared</span>`;
+
+    const phoneClean = cust.phone ? String(cust.phone).replace(/[^0-9]/g, '') : '';
+    const waActionBtn = phoneClean
+      ? `<a href="https://wa.me/91${phoneClean}?text=${encodeURIComponent(`Dear ${cust.name}, here is your account summary from Aaryan Aqua Needs. Total Billed: ₹${formatCurrency(cust.totalBilled)}, Received: ₹${formatCurrency(cust.totalPaid)}, Current Balance Due: ₹${formatCurrency(cust.totalBalance)}. Thank you!`)}" target="_blank" class="action-btn share btn-whatsapp" title="Send WhatsApp Statement" style="display: inline-flex; align-items: center; justify-content: center;"><i class="fa-brands fa-whatsapp" style="color: #16a34a;"></i></a>`
+      : `<button class="action-btn edit" onclick="startBillForCustomer('${cust.name.replace(/'/g, "\\'")}')" title="New Bill for ${cust.name}"><i class="fa-solid fa-cart-plus"></i></button>`;
+
+    return `
+      <tr>
+        <td>
+          <div class="ledger-cust-name">
+            <i class="fa-solid fa-building-user text-muted" style="font-size: 13px;"></i>
+            <span>${cust.name}</span>
+          </div>
+        </td>
+        <td>${cust.phone ? `<i class="fa-brands fa-whatsapp text-emerald" style="font-size: 11px;"></i> ${cust.phone}` : '<span class="text-muted">—</span>'}</td>
+        <td class="text-center" style="font-weight: 700;">${cust.invoiceCount}</td>
+        <td style="text-align: right; font-weight: 700;">₹ ${formatCurrency(cust.totalBilled)}</td>
+        <td style="text-align: right; color: #059669; font-weight: 700;">₹ ${formatCurrency(cust.totalPaid)}</td>
+        <td style="text-align: right;">${balPill}</td>
+        <td class="text-center actions-cell">
+          ${waActionBtn}
+          <button class="action-btn edit" onclick="startBillForCustomer('${cust.name.replace(/'/g, "\\'")}')" title="New Bill for ${cust.name}"><i class="fa-solid fa-cart-plus"></i></button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+};
+
 function updateDashboardOverview() {
   loadAllDatabases();
 
@@ -3065,62 +3182,61 @@ function updateDashboardOverview() {
           </tr>
         `;
       }
-      return;
-    }
+    } else {
+      recent.forEach(inv => {
+        const details = inv.details || {};
+        const isEstimate = Boolean(inv.isEstimate || details.isEstimate || String(inv.invoiceNo || "").startsWith("EST-"));
+        const payInfo = typeof getInvoicePaidAndBalance === "function" 
+          ? getInvoicePaidAndBalance(inv) 
+          : { status: 'Paid', isPaid: true, paid: safeParseAmount(inv.total), balance: 0, total: safeParseAmount(inv.total) };
+        const status = payInfo.status;
+        const isPaid = payInfo.isPaid;
+        const balance = payInfo.balance;
 
-    recent.forEach(inv => {
-      const details = inv.details || {};
-      const isEstimate = Boolean(inv.isEstimate || details.isEstimate || String(inv.invoiceNo || "").startsWith("EST-"));
-      const payInfo = typeof getInvoicePaidAndBalance === "function" 
-        ? getInvoicePaidAndBalance(inv) 
-        : { status: 'Paid', isPaid: true, paid: safeParseAmount(inv.total), balance: 0, total: safeParseAmount(inv.total) };
-      const status = payInfo.status;
-      const isPaid = payInfo.isPaid;
-      const balance = payInfo.balance;
+        let badgeClass = 'badge-paid';
+        if (status === 'Partial') badgeClass = 'badge-partial';
+        if (status === 'Unpaid') badgeClass = 'badge-unpaid';
 
-      let badgeClass = 'badge-paid';
-      if (status === 'Partial') badgeClass = 'badge-partial';
-      if (status === 'Unpaid') badgeClass = 'badge-unpaid';
+        let balanceQrBtn = "";
+        if (!isEstimate && !isPaid && balance > 0) {
+          balanceQrBtn = `
+            <button class="action-btn share" onclick="openBalanceQrModal('${inv.id}')" title="Scan & Settle Balance (₹ ${formatCurrency(balance)})" style="background: rgba(6, 182, 212, 0.15); color: #06b6d4;"><i class="fa-solid fa-qrcode"></i></button>
+          `;
+        }
 
-      let balanceQrBtn = "";
-      if (!isEstimate && !isPaid && balance > 0) {
-        balanceQrBtn = `
-          <button class="action-btn share" onclick="openBalanceQrModal('${inv.id}')" title="Scan & Settle Balance (₹ ${formatCurrency(balance)})" style="background: rgba(6, 182, 212, 0.15); color: #06b6d4;"><i class="fa-solid fa-qrcode"></i></button>
+        const invTotal = safeParseAmount(inv.total !== undefined ? inv.total : details.total);
+        const custName = (inv.customerName || (details.buyer && details.buyer.name) || 'Cash Customer').trim();
+        const itemsCount = inv.itemsCount !== undefined ? inv.itemsCount : ((inv.items || details.items || []).length);
+
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td style="font-weight: 700; color: var(--primary-teal); white-space: nowrap;">#${inv.invoiceNo}</td>
+          <td style="white-space: nowrap;">${formatInputDateString(inv.invoiceDate)}</td>
+          <td style="font-weight: 600; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${custName}">${custName}</td>
+          <td class="text-center" style="white-space: nowrap;">${itemsCount}</td>
+          <td style="text-align: right; font-weight: 700; white-space: nowrap;">₹ ${formatCurrency(invTotal)}</td>
+          <td class="text-center" style="white-space: nowrap;">
+            <span class="badge-status ${badgeClass}">${status}</span>
+            ${(!isPaid && balance > 0) ? `<div style="font-size: 10px; color: #b45309; font-weight: 700; margin-top: 2px;">Bal: ₹${formatCurrency(balance)}</div>` : ''}
+          </td>
+          <td class="actions-cell">
+            ${balanceQrBtn}
+            <button class="action-btn repeat" onclick="repeatInvoice('${inv.id}')" title="Repeat Bill (Clone to New Invoice)"><i class="fa-solid fa-arrows-rotate" style="color: #6366f1;"></i></button>
+            <button class="action-btn edit" onclick="editSavedInvoice('${inv.id}')" title="Edit Invoice"><i class="fa-solid fa-pen-to-square"></i></button>
+            <button class="action-btn print" onclick="printSavedInvoice('${inv.id}')" title="Print A4 Tax Invoice"><i class="fa-solid fa-print"></i></button>
+            <button class="action-btn print" onclick="printSavedInvoiceThermal('${inv.id}')" title="Print Thermal POS Receipt"><i class="fa-solid fa-receipt"></i></button>
+            <button class="action-btn share btn-whatsapp" onclick="shareInvoiceToWhatsApp('${inv.id}', this)" title="Share PDF via WhatsApp (1-Click)"><i class="fa-brands fa-whatsapp" style="color: #16a34a;"></i></button>
+            <button class="action-btn share btn-telegram" onclick="shareInvoiceToTelegram('${inv.id}', this)" title="Share PDF to Telegram (@fishbilling_bot_bot)"><i class="fa-brands fa-telegram" style="color: #0284c7;"></i></button>
+            <button class="action-btn share" onclick="openUniversalInvoiceShareModal('${inv.id}')" title="Universal Share (Nearby / Email / Copy / Native)"><i class="fa-solid fa-share-nodes" style="color: #0891b2;"></i></button>
+            <button class="action-btn delete" onclick="deleteSavedInvoice('${inv.id || inv.invoiceNo}')" title="Delete Invoice"><i class="fa-solid fa-trash"></i></button>
+          </td>
         `;
-      }
-
-      const invTotal = safeParseAmount(inv.total !== undefined ? inv.total : details.total);
-      const custName = (inv.customerName || (details.buyer && details.buyer.name) || 'Cash Customer').trim();
-      const itemsCount = inv.itemsCount !== undefined ? inv.itemsCount : ((inv.items || details.items || []).length);
-
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td style="font-weight: 700; color: var(--primary-teal); white-space: nowrap;">#${inv.invoiceNo}</td>
-        <td style="white-space: nowrap;">${formatInputDateString(inv.invoiceDate)}</td>
-        <td style="font-weight: 600; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${custName}">${custName}</td>
-        <td class="text-center" style="white-space: nowrap;">${itemsCount}</td>
-        <td style="text-align: right; font-weight: 700; white-space: nowrap;">₹ ${formatCurrency(invTotal)}</td>
-        <td class="text-center" style="white-space: nowrap;">
-          <span class="badge-status ${badgeClass}">${status}</span>
-          ${(!isPaid && balance > 0) ? `<div style="font-size: 10px; color: #b45309; font-weight: 700; margin-top: 2px;">Bal: ₹${formatCurrency(balance)}</div>` : ''}
-        </td>
-        <td class="actions-cell">
-          ${balanceQrBtn}
-          <button class="action-btn repeat" onclick="repeatInvoice('${inv.id}')" title="Repeat Bill (Clone to New Invoice)"><i class="fa-solid fa-arrows-rotate" style="color: #6366f1;"></i></button>
-          <button class="action-btn edit" onclick="editSavedInvoice('${inv.id}')" title="Edit Invoice"><i class="fa-solid fa-pen-to-square"></i></button>
-          <button class="action-btn print" onclick="printSavedInvoice('${inv.id}')" title="Print A4 Tax Invoice"><i class="fa-solid fa-print"></i></button>
-          <button class="action-btn print" onclick="printSavedInvoiceThermal('${inv.id}')" title="Print Thermal POS Receipt"><i class="fa-solid fa-receipt"></i></button>
-          <button class="action-btn share btn-whatsapp" onclick="shareInvoiceToWhatsApp('${inv.id}', this)" title="Share PDF via WhatsApp (1-Click)"><i class="fa-brands fa-whatsapp" style="color: #16a34a;"></i></button>
-          <button class="action-btn share btn-telegram" onclick="shareInvoiceToTelegram('${inv.id}', this)" title="Share PDF to Telegram (@fishbilling_bot_bot)"><i class="fa-brands fa-telegram" style="color: #0284c7;"></i></button>
-          <button class="action-btn share" onclick="openUniversalInvoiceShareModal('${inv.id}')" title="Universal Share (Nearby / Email / Copy / Native)"><i class="fa-solid fa-share-nodes" style="color: #0891b2;"></i></button>
-          <button class="action-btn delete" onclick="deleteSavedInvoice('${inv.id || inv.invoiceNo}')" title="Delete Invoice"><i class="fa-solid fa-trash"></i></button>
-        </td>
-      `;
-      elements.dashboardRecentInvoicesBody.appendChild(tr);
-    });
+        elements.dashboardRecentInvoicesBody.appendChild(tr);
+      });
+    }
   }
 
-  // Render the Customer Outstanding & Trust Ledger Card
+  // ALWAYS Render the Customer Outstanding & Trust Ledger Card!
   if (typeof window.renderCustomerLedgerSummary === 'function') {
     window.renderCustomerLedgerSummary();
   }
@@ -3849,110 +3965,88 @@ function bindBillingFormInputs() {
     if (typeof calculateSummaryAndTable === 'function') calculateSummaryAndTable();
     if (typeof window.playAudioFeedback === 'function') window.playAudioFeedback("add");
   };
+  // Customer Outstanding & Trust Ledger functions are defined above before updateDashboardOverview
 
-  // --- CUSTOMER OUTSTANDING & TRUST LEDGER SUMMARY ---
-  window.renderCustomerLedgerSummary = function() {
-    const tbody = document.getElementById("dashboard-customer-ledger-body");
-    if (!tbody) return;
+  // --- ENHANCED KEYBOARD SHORTCUTS CONTROLLER ---
+  let cmdPaletteSelectedIndex = 0;
+  let currentCmdPaletteItems = [];
 
-    const customerMap = new Map();
-
-    (invoicesDb || []).forEach(inv => {
-      if (!inv) return;
-      const isEst = Boolean(inv.isEstimate || inv.details?.isEstimate || String(inv.invoiceNo || "").startsWith("EST-"));
-      if (isEst) return;
-
-      const details = inv.details || {};
-      const buyer = details.buyer || {};
-      const rawName = (inv.customerName || buyer.name || 'Cash Customer').trim();
-      if (!rawName) return;
-
-      const normKey = rawName.toLowerCase();
-      let record = customerMap.get(normKey);
-      if (!record) {
-        record = {
-          name: rawName,
-          phone: buyer.phone || inv.customerPhone || "",
-          invoiceCount: 0,
-          totalBilled: 0,
-          totalPaid: 0,
-          totalBalance: 0
-        };
-        customerMap.set(normKey, record);
+  window.openCommandPalette = function() {
+    const modal = document.getElementById("global-command-palette-modal");
+    if (modal) {
+      modal.classList.remove("hidden");
+      modal.style.display = "flex";
+      const cmdInput = document.getElementById("cmd-palette-input");
+      if (cmdInput) {
+        cmdInput.value = "";
+        cmdPaletteSelectedIndex = 0;
+        window.renderCommandPalette("");
+        cmdInput.focus();
       }
+    } else if (typeof window.openKeyboardShortcutsModal === 'function') {
+      window.openKeyboardShortcutsModal();
+    }
+  };
 
-      if (!record.phone && buyer.phone) record.phone = buyer.phone;
+  window.closeCommandPalette = function() {
+    const modal = document.getElementById("global-command-palette-modal");
+    if (modal) {
+      modal.classList.add("hidden");
+      modal.style.display = "none";
+    }
+  };
 
-      const payInfo = typeof getInvoicePaidAndBalance === "function" 
-        ? getInvoicePaidAndBalance(inv) 
-        : { total: safeParseAmount(inv.total), paid: safeParseAmount(inv.total), balance: 0 };
+  window.renderCommandPalette = function(query = "") {
+    const listEl = document.getElementById("cmd-palette-results");
+    if (!listEl) return;
+    const q = (query || "").trim().toLowerCase();
 
-      record.invoiceCount += 1;
-      record.totalBilled += payInfo.total;
-      record.totalPaid += payInfo.paid;
-      record.totalBalance += payInfo.balance;
-    });
+    const allItems = [
+      { id: 'new_bill', title: 'New GST Invoice', subtitle: 'Start creating a new invoice (Alt+N)', icon: 'fa-plus', action: () => switchTab('billing') },
+      { id: 'history', title: 'Invoice History', subtitle: 'View past invoices and payments (Alt+H)', icon: 'fa-clock-rotate-left', action: () => switchTab('history') },
+      { id: 'products', title: 'Products & Inventory', subtitle: 'Manage stock and price list (Alt+P)', icon: 'fa-cubes', action: () => switchTab('products') },
+      { id: 'parties', title: 'Customers & Parties', subtitle: 'Manage customer accounts (Alt+C)', icon: 'fa-users', action: () => switchTab('parties') },
+      { id: 'reports', title: 'Reports & Analytics', subtitle: 'Sales analytics and financial summaries (Alt+R)', icon: 'fa-chart-pie', action: () => switchTab('reports') },
+      { id: 'settings', title: 'Settings & Profile', subtitle: 'Business info, bank details, and GST (Alt+S)', icon: 'fa-gear', action: () => switchTab('settings') },
+      { id: 'shortcuts', title: 'Keyboard Shortcuts', subtitle: 'View all quick hotkeys (Alt+/)', icon: 'fa-keyboard', action: () => window.openKeyboardShortcutsModal() },
+      { id: 'restock', title: 'Quick Inward Restock', subtitle: 'Receive stock shipment (F2)', icon: 'fa-boxes-packing', action: () => window.triggerQuickInwardFromBilling() },
+      { id: 'calc', title: 'Quick Calculator', subtitle: 'Open built-in floating calculator (Alt+C)', icon: 'fa-calculator', action: () => { if (typeof toggleCalc === 'function') toggleCalc(); } }
+    ];
 
-    const customers = Array.from(customerMap.values()).sort((a, b) => {
-      // Prioritize pending balances first, then highest volume
-      if (b.totalBalance !== a.totalBalance) return b.totalBalance - a.totalBalance;
-      return b.totalBilled - a.totalBilled;
-    });
-
-    if (customers.length === 0) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="7" class="text-center text-muted" style="padding: 24px;">
-            No customer ledger records yet. Create invoices to track customer outstanding balances here.
-          </td>
-        </tr>
-      `;
+    currentCmdPaletteItems = q ? allItems.filter(it => it.title.toLowerCase().includes(q) || it.subtitle.toLowerCase().includes(q)) : allItems;
+    if (currentCmdPaletteItems.length === 0) {
+      listEl.innerHTML = '<div style="padding: 16px; text-align: center; color: #94a3b8; font-size: 13px;">No matching actions found</div>';
       return;
     }
 
-    tbody.innerHTML = customers.map(cust => {
-      const hasBalance = cust.totalBalance > 0.01;
-      const balPill = hasBalance
-        ? `<span class="ledger-balance-pill pending"><i class="fa-solid fa-clock"></i> ₹${formatCurrency(cust.totalBalance)}</span>`
-        : `<span class="ledger-balance-pill cleared"><i class="fa-solid fa-circle-check"></i> Cleared</span>`;
-
-      const phoneClean = cust.phone ? String(cust.phone).replace(/[^0-9]/g, '') : '';
-      const waActionBtn = phoneClean
-        ? `<a href="https://wa.me/91${phoneClean}?text=${encodeURIComponent(`Dear ${cust.name}, here is your account summary from Aaryan Aqua Needs. Total Billed: ₹${formatCurrency(cust.totalBilled)}, Received: ₹${formatCurrency(cust.totalPaid)}, Current Balance Due: ₹${formatCurrency(cust.totalBalance)}. Thank you!`)}" target="_blank" class="action-btn share btn-whatsapp" title="Send WhatsApp Statement" style="display: inline-flex; align-items: center; justify-content: center;"><i class="fa-brands fa-whatsapp" style="color: #16a34a;"></i></a>`
-        : `<button class="action-btn edit" onclick="startBillForCustomer('${cust.name.replace(/'/g, "\\'")}')" title="New Bill for ${cust.name}"><i class="fa-solid fa-cart-plus"></i></button>`;
-
-      return `
-        <tr>
-          <td>
-            <div class="ledger-cust-name">
-              <i class="fa-solid fa-building-user text-muted" style="font-size: 13px;"></i>
-              <span>${cust.name}</span>
-            </div>
-          </td>
-          <td>${cust.phone ? `<i class="fa-brands fa-whatsapp text-emerald" style="font-size: 11px;"></i> ${cust.phone}` : '<span class="text-muted">—</span>'}</td>
-          <td class="text-center" style="font-weight: 700;">${cust.invoiceCount}</td>
-          <td style="text-align: right; font-weight: 700;">₹ ${formatCurrency(cust.totalBilled)}</td>
-          <td style="text-align: right; color: #059669; font-weight: 700;">₹ ${formatCurrency(cust.totalPaid)}</td>
-          <td style="text-align: right;">${balPill}</td>
-          <td class="text-center actions-cell">
-            ${waActionBtn}
-            <button class="action-btn edit" onclick="startBillForCustomer('${cust.name.replace(/'/g, "\\'")}')" title="New Bill for ${cust.name}"><i class="fa-solid fa-cart-plus"></i></button>
-          </td>
-        </tr>
-      `;
-    }).join('');
+    listEl.innerHTML = currentCmdPaletteItems.map((it, idx) => `
+      <div class="cmd-palette-item ${idx === cmdPaletteSelectedIndex ? 'selected' : ''}" 
+           onclick="window.executeCommandPaletteItem(${idx})"
+           style="padding: 10px 14px; display: flex; align-items: center; gap: 12px; cursor: pointer; border-radius: 8px; ${idx === cmdPaletteSelectedIndex ? 'background: rgba(6, 182, 212, 0.15);' : ''}">
+        <i class="fa-solid ${it.icon}" style="color: #0891b2; font-size: 16px; width: 20px; text-align: center;"></i>
+        <div style="flex: 1;">
+          <div style="font-weight: 600; font-size: 13px; color: #0f172a;">${it.title}</div>
+          <div style="font-size: 11px; color: #64748b;">${it.subtitle}</div>
+        </div>
+      </div>
+    `).join('');
   };
 
-  window.startBillForCustomer = function(customerName) {
-    switchTab("billing");
-    if (elements.billBuyerName) {
-      elements.billBuyerName.value = customerName;
-      if (typeof onBuyerNameChange === 'function') onBuyerNameChange();
-      elements.billBuyerName.focus();
+  window.executeCommandPaletteItem = function(index) {
+    if (currentCmdPaletteItems && currentCmdPaletteItems[index]) {
+      const item = currentCmdPaletteItems[index];
+      window.closeCommandPalette();
+      if (typeof item.action === 'function') item.action();
     }
   };
 
-  // --- ENHANCED KEYBOARD SHORTCUTS CONTROLLER ---
+  function scrollToSelectedCmdItem() {
+    const listEl = document.getElementById("cmd-palette-results");
+    if (!listEl) return;
+    const selected = listEl.querySelector(".cmd-palette-item.selected");
+    if (selected) selected.scrollIntoView({ block: 'nearest' });
+  }
+
   window.initKeyboardShortcuts = function() {
     const cmdInput = document.getElementById("cmd-palette-input");
     if (cmdInput && !cmdInput.dataset.wired) {
@@ -3989,14 +4083,23 @@ function bindBillingFormInputs() {
     document.addEventListener("keydown", (e) => {
       // 1. Escape closes Command Palette, shortcuts modal, and popovers
       if (e.key === "Escape") {
-        window.closeCommandPalette();
-        window.closeSmartProductPopover();
-        window.closeKeyboardShortcutsModal();
+        if (typeof window.closeCommandPalette === 'function') window.closeCommandPalette();
+        if (typeof window.closeSmartProductPopover === 'function') window.closeSmartProductPopover();
+        if (typeof window.closeKeyboardShortcutsModal === 'function') window.closeKeyboardShortcutsModal();
         return;
       }
 
-      // 2. Command Palette: Ctrl+K, Cmd+K, or F2
-      if (((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) || e.key === "F2") {
+      // 2. Quick Inward Restock: F2
+      if (e.key === "F2") {
+        e.preventDefault();
+        if (typeof window.triggerQuickInwardFromBilling === 'function') {
+          window.triggerQuickInwardFromBilling();
+        }
+        return;
+      }
+
+      // 3. Command Palette: Ctrl+K or Cmd+K
+      if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
         e.preventDefault();
         const modal = document.getElementById("global-command-palette-modal");
         if (modal && !modal.classList.contains("hidden")) {
@@ -4615,7 +4718,9 @@ function triggerInvoiceNumberRollbackEffect(oldVal, newVal) {
       if (elements.billInvoiceNo) elements.billInvoiceNo.classList.remove('invoice-no-rollback-active');
     }, 2500);
 
-    const isBillingTabActive = document.getElementById("tab-billing")?.classList.contains("active");
+    const isBillingTabActive = document.querySelector('.sidebar-nav .nav-item[data-tab="billing"]')?.classList.contains("active") ||
+                               document.querySelector('.mobile-bottom-nav-item[data-bottom-tab="billing"], .mobile-bottom-nav-fab[data-bottom-tab="billing"]')?.classList.contains("active") ||
+                               document.getElementById("view-billing")?.classList.contains("active");
     if (isBillingTabActive && typeof showFloatingToast === 'function' && oldVal && oldVal !== newVal) {
       showFloatingToast(`🔄 Sequence updated: Invoice #${newVal} auto-assigned (freed from deleted #${oldVal})`, "info");
     }
@@ -4671,10 +4776,13 @@ function autoSuggestInvoiceNo(force = false, preferInvoiceNo = null) {
     elements.billInvoiceDate.value = today;
   }
 
-  const invNoEl = document.getElementById("p-bill-invoice-no");
-  if (invNoEl && elements.billInvoiceNo) {
-    invNoEl.textContent = "#" + (elements.billInvoiceNo.value || "0000");
-  }
+  const billNoVal = elements.billInvoiceNo?.value || "0000";
+  const sumMetaInvNo = document.getElementById("sum-meta-invoice-no");
+  if (sumMetaInvNo) sumMetaInvNo.textContent = "#" + billNoVal;
+  const printInvNo = document.getElementById("p-print-invoice-no");
+  if (printInvNo) printInvNo.textContent = "#" + billNoVal;
+  const metaDateEl = document.getElementById("sum-meta-date");
+  if (metaDateEl) metaDateEl.textContent = elements.billInvoiceDate?.value || today;
 }
 
 // --- ADVANCED QUOTATION / ESTIMATE MODE ---
@@ -4709,6 +4817,8 @@ window.switchBillingMode = function(mode) {
       docTypeSelect.value = "Proforma Invoice";
       if (typeof updatePrintTitleHeader === 'function') updatePrintTitleHeader();
     }
+    const metaDocType = document.getElementById("sum-meta-doc-type");
+    if (metaDocType) metaDocType.textContent = "QUOTATION / ESTIMATE";
     if (saveBtn) {
       saveBtn.innerHTML = `<i class="fa-solid fa-file-signature"></i> Save &amp; Generate Quotation`;
     }
@@ -4737,6 +4847,8 @@ window.switchBillingMode = function(mode) {
       docTypeSelect.value = "Tax Invoice";
       if (typeof updatePrintTitleHeader === 'function') updatePrintTitleHeader();
     }
+    const metaDocType = document.getElementById("sum-meta-doc-type");
+    if (metaDocType) metaDocType.textContent = "BILL OF SUPPLY";
     if (saveBtn) {
       saveBtn.innerHTML = `<i class="fa-solid fa-file-invoice"></i> Generate &amp; Save Invoice (Auto-Send)`;
     }
@@ -4762,10 +4874,10 @@ function autoSuggestEstimateNo(force = false) {
   if (elements.billInvoiceNo) {
     elements.billInvoiceNo.value = nextStr;
   }
-  const invNoEl = document.getElementById("p-bill-invoice-no");
-  if (invNoEl) {
-    invNoEl.textContent = "#" + nextStr;
-  }
+  const sumMetaInvNo = document.getElementById("sum-meta-invoice-no");
+  if (sumMetaInvNo) sumMetaInvNo.textContent = "#" + nextStr;
+  const printInvNo = document.getElementById("p-print-invoice-no");
+  if (printInvNo) printInvNo.textContent = "#" + nextStr;
 }
 
 window.convertEstimateToInvoice = function(estimateId) {
@@ -5207,6 +5319,104 @@ async function scanCanvasMultiPass(canvas, startTime) {
             durationMs: Math.round(performance.now() - startTime)
           };
         }
+      }
+    } catch (e) {}
+
+    // PASS 7: Quiet-Zone White Padding (Essential for tightly-cropped screenshots & colored borders)
+    try {
+      const pad = Math.max(32, Math.round(Math.min(width, height) * 0.15));
+      const pCanvas = document.createElement("canvas");
+      pCanvas.width = width + pad * 2;
+      pCanvas.height = height + pad * 2;
+      const pCtx = pCanvas.getContext("2d", { willReadFrequently: true });
+      pCtx.fillStyle = "#ffffff";
+      pCtx.fillRect(0, 0, pCanvas.width, pCanvas.height);
+      pCtx.drawImage(canvas, pad, pad);
+      const pData = pCtx.getImageData(0, 0, pCanvas.width, pCanvas.height);
+      qr = jsQR(pData.data, pCanvas.width, pCanvas.height, { inversionAttempts: "attemptBoth" });
+      if (qr && qr.data) {
+        return {
+          success: true,
+          text: qr.data,
+          format: "qr_code",
+          method: "jsQR Quiet-Zone Padded",
+          durationMs: Math.round(performance.now() - startTime)
+        };
+      }
+    } catch (e) {}
+
+    // PASS 8: Sub-Region Square Crop (Handles images with top header banners, e.g. "VERIFY & PAY" box)
+    try {
+      if (width > 60 && height > 60) {
+        const sqSize = Math.min(width, height);
+        const candidateOffsets = [
+          // Center crop
+          { x: Math.round((width - sqSize) / 2), y: Math.round((height - sqSize) / 2) },
+          // Bottom crop (below top banners)
+          { x: Math.round((width - sqSize) / 2), y: Math.max(0, height - sqSize) },
+          // Top crop
+          { x: Math.round((width - sqSize) / 2), y: 0 }
+        ];
+
+        for (const off of candidateOffsets) {
+          const sqPad = 28;
+          const sqCanvas = document.createElement("canvas");
+          sqCanvas.width = sqSize + sqPad * 2;
+          sqCanvas.height = sqSize + sqPad * 2;
+          const sqCtx = sqCanvas.getContext("2d", { willReadFrequently: true });
+          sqCtx.fillStyle = "#ffffff";
+          sqCtx.fillRect(0, 0, sqCanvas.width, sqCanvas.height);
+          sqCtx.drawImage(canvas, off.x, off.y, sqSize, sqSize, sqPad, sqPad, sqSize, sqSize);
+          const sqData = sqCtx.getImageData(0, 0, sqCanvas.width, sqCanvas.height);
+          qr = jsQR(sqData.data, sqCanvas.width, sqCanvas.height, { inversionAttempts: "attemptBoth" });
+          if (qr && qr.data) {
+            return {
+              success: true,
+              text: qr.data,
+              format: "qr_code",
+              method: "jsQR Sub-Region Crop",
+              durationMs: Math.round(performance.now() - startTime)
+            };
+          }
+        }
+      }
+    } catch (e) {}
+
+    // PASS 9: High-Contrast Adaptive Binarization with White Padding
+    try {
+      const thPad = 24;
+      const thCanvas = document.createElement("canvas");
+      thCanvas.width = width + thPad * 2;
+      thCanvas.height = height + thPad * 2;
+      const thCtx = thCanvas.getContext("2d", { willReadFrequently: true });
+      thCtx.fillStyle = "#ffffff";
+      thCtx.fillRect(0, 0, thCanvas.width, thCanvas.height);
+      thCtx.drawImage(canvas, thPad, thPad);
+      const thData = thCtx.getImageData(0, 0, thCanvas.width, thCanvas.height);
+      const d = thData.data;
+      let totalLum = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        totalLum += (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+      }
+      const avgLum = totalLum / (thCanvas.width * thCanvas.height);
+      const threshold = Math.min(210, Math.max(70, avgLum));
+      for (let i = 0; i < d.length; i += 4) {
+        const lum = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+        const v = lum > threshold ? 255 : 0;
+        d[i] = v;
+        d[i + 1] = v;
+        d[i + 2] = v;
+        d[i + 3] = 255;
+      }
+      qr = jsQR(d, thCanvas.width, thCanvas.height, { inversionAttempts: "attemptBoth" });
+      if (qr && qr.data) {
+        return {
+          success: true,
+          text: qr.data,
+          format: "qr_code",
+          method: "jsQR Adaptive Binarized",
+          durationMs: Math.round(performance.now() - startTime)
+        };
       }
     } catch (e) {}
   }
@@ -6457,19 +6667,19 @@ window.openInvoiceSuccessModal = function(invoiceRecord) {
   modal.style.removeProperty("display");
   modal.style.removeProperty("visibility");
 
-  // Automated auto-advance countdown to prepare next bill without manual clicks
+  // Automated auto-advance countdown to prepare next bill without manual clicks (comfortable 15s)
   const autoNextNotice = document.getElementById("modal-success-auto-next");
   if (autoNextNotice) {
     autoNextNotice.style.display = "block";
-    invoiceModalAutoRemaining = 3;
-    autoNextNotice.innerHTML = `<i class="fa-solid fa-bolt text-teal"></i> Next invoice starting in <strong>${invoiceModalAutoRemaining}s</strong>... <button type="button" class="btn btn-xs btn-outline" onclick="cancelInvoiceAutoAdvance(event)" style="margin-left: 8px; font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid #10b981; background: #fff; cursor: pointer;">Stay on Bill</button>`;
+    invoiceModalAutoRemaining = 15;
+    autoNextNotice.innerHTML = `<i class="fa-solid fa-clock text-teal"></i> Next invoice starting in <strong>${invoiceModalAutoRemaining}s</strong>... <button type="button" class="btn btn-xs btn-outline" onclick="cancelInvoiceAutoAdvance(event)" style="margin-left: 8px; font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid #10b981; background: #fff; cursor: pointer;">Stay on Bill</button>`;
   }
 
   if (invoiceModalAutoTimer) clearInterval(invoiceModalAutoTimer);
   invoiceModalAutoTimer = setInterval(() => {
     invoiceModalAutoRemaining--;
     if (autoNextNotice) {
-      autoNextNotice.innerHTML = `<i class="fa-solid fa-bolt text-teal"></i> Next invoice starting in <strong>${invoiceModalAutoRemaining}s</strong>... <button type="button" class="btn btn-xs btn-outline" onclick="cancelInvoiceAutoAdvance(event)" style="margin-left: 8px; font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid #10b981; background: #fff; cursor: pointer;">Stay on Bill</button>`;
+      autoNextNotice.innerHTML = `<i class="fa-solid fa-clock text-teal"></i> Next invoice starting in <strong>${invoiceModalAutoRemaining}s</strong>... <button type="button" class="btn btn-xs btn-outline" onclick="cancelInvoiceAutoAdvance(event)" style="margin-left: 8px; font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid #10b981; background: #fff; cursor: pointer;">Stay on Bill</button>`;
     }
     if (invoiceModalAutoRemaining <= 0) {
       clearInterval(invoiceModalAutoTimer);
@@ -6487,7 +6697,7 @@ window.cancelInvoiceAutoAdvance = function(e) {
   }
   const autoNextNotice = document.getElementById("modal-success-auto-next");
   if (autoNextNotice) {
-    autoNextNotice.innerHTML = `<i class="fa-solid fa-circle-check text-success"></i> Auto-advance paused. Bill ready for printing or download.`;
+    autoNextNotice.innerHTML = `<i class="fa-solid fa-circle-check text-success"></i> Auto-advance paused. Bill ready for WhatsApp, printing, or download.`;
   }
 };
 
@@ -6495,22 +6705,25 @@ window.updateSuccessModalWhatsAppStatus = function(invoiceRecord) {
   if (!invoiceRecord) return;
   const waBtn = document.getElementById("modal-success-btn-whatsapp");
   if (!waBtn) return;
-  const consigneePhone = invoiceRecord.details?.consignee?.phone || invoiceRecord.details?.buyer?.phone || "";
+  const consigneePhone = invoiceRecord.details?.consignee?.phone || invoiceRecord.details?.buyer?.phone || invoiceRecord.customerPhone || "";
   const cleanDigits = consigneePhone.toString().replace(/\D/g, '');
   const isBotConnected = whatsappBotStatus && (whatsappBotStatus.isReady || whatsappBotStatus.status === 'CONNECTED');
 
+  waBtn.style.background = "#16a34a";
+  waBtn.style.color = "#ffffff";
+  waBtn.style.display = "inline-flex";
+
   if (invoiceRecord.waAutoSent) {
-    waBtn.innerHTML = `<i class="fa-solid fa-circle-check text-success"></i> WhatsApp Sent!`;
+    waBtn.innerHTML = `<i class="fa-solid fa-circle-check text-white"></i> WhatsApp Sent!`;
     waBtn.style.background = "#15803d";
     waBtn.title = "Dispatched via WhatsApp Companion Bot";
   } else if (cleanDigits.length >= 10) {
     const formatted = cleanDigits.length === 10 ? cleanDigits : cleanDigits.slice(-10);
     waBtn.innerHTML = `<i class="fa-brands fa-whatsapp"></i> Send WhatsApp (+91 ${formatted})`;
-    waBtn.style.background = "#16a34a";
-    waBtn.title = isBotConnected ? "Send immediately via WhatsApp Bot" : "Dispatched via WhatsApp Bot";
+    waBtn.title = isBotConnected ? "Send immediately via WhatsApp Bot or 1-Click WhatsApp" : "1-Click Send via WhatsApp";
   } else {
-    waBtn.innerHTML = `<i class="fa-brands fa-whatsapp"></i> WhatsApp`;
-    waBtn.style.background = "#16a34a";
+    waBtn.innerHTML = `<i class="fa-brands fa-whatsapp"></i> Send WhatsApp`;
+    waBtn.title = "Send Invoice via WhatsApp";
   }
 };
 
@@ -6534,6 +6747,7 @@ window.closeInvoiceSuccessModal = function(goToHistory = false) {
 };
 
 window.triggerSuccessModalA4Print = function() {
+  if (typeof window.cancelInvoiceAutoAdvance === 'function') window.cancelInvoiceAutoAdvance();
   if (!lastSavedInvoiceRecord) return;
   const rec = lastSavedInvoiceRecord;
   window.closeInvoiceSuccessModal(false);
@@ -6545,6 +6759,7 @@ window.triggerSuccessModalA4Print = function() {
 };
 
 window.triggerSuccessModalThermalPrint = function() {
+  if (typeof window.cancelInvoiceAutoAdvance === 'function') window.cancelInvoiceAutoAdvance();
   if (!lastSavedInvoiceRecord) return;
   const rec = lastSavedInvoiceRecord;
   window.closeInvoiceSuccessModal(false);
@@ -6557,16 +6772,18 @@ window.triggerSuccessModalThermalPrint = function() {
 };
 
 window.triggerSuccessModalDownloadPdf = function() {
+  if (typeof window.cancelInvoiceAutoAdvance === 'function') window.cancelInvoiceAutoAdvance();
   if (!lastSavedInvoiceRecord) return;
   const rec = lastSavedInvoiceRecord;
   downloadInvoicePdf(rec.details);
 };
 
 window.triggerSuccessModalWhatsApp = function() {
+  if (typeof window.cancelInvoiceAutoAdvance === 'function') window.cancelInvoiceAutoAdvance();
   if (!lastSavedInvoiceRecord) return;
   const rec = lastSavedInvoiceRecord;
   const waBtn = document.getElementById("modal-success-btn-whatsapp");
-  shareInvoicePdfNative(rec.details, waBtn, false);
+  shareInvoicePdfNative(rec.details, waBtn, true); // force1Click = true ensures immediate delivery / fallback!
 };
 
 window.triggerSuccessModalUniversalShare = function() {
@@ -9058,6 +9275,7 @@ window.shareInvoicePdfNative = async function(details, btnEl = null, force1Click
     }
     showFloatingToast(`🤖 Sending invoice #${details.invoiceNo} & PDF document silently via WhatsApp Bot...`, "info", 3000);
 
+    let anyDelivered = false;
     try {
       // Send to Consignee first, and if Receiver also has a distinct phone, send to Receiver as well!
       const targetsToSend = (recipientsInfo.allRecipients && recipientsInfo.allRecipients.length > 0)
@@ -9082,6 +9300,7 @@ window.shareInvoicePdfNative = async function(details, btnEl = null, force1Click
       }
 
       if (sentCount > 0) {
+        anyDelivered = true;
         if (typeof playSuccessChime === 'function') playSuccessChime();
         if (btnEl && btnEl.tagName) {
           btnEl.innerHTML = `<i class="fa-solid fa-circle-check text-success"></i> Sent via Bot!`;
@@ -9092,23 +9311,25 @@ window.shareInvoicePdfNative = async function(details, btnEl = null, force1Click
         }
         showFloatingToast(`🚀 Invoice #${details.invoiceNo} & PDF sent automatically to ${sentLabels.join(" & ")} via WhatsApp Bot!`, "success", 5000);
         return true;
-      } else {
-        throw new Error('Failed to dispatch to recipient(s)');
       }
     } catch (fastErr) {
       console.warn("Background bot dispatch note:", fastErr);
+    }
+
+    if (!anyDelivered) {
       if (btnEl && btnEl.tagName) {
         btnEl.innerHTML = origHtml;
         btnEl.disabled = false;
       }
-      showFloatingToast(`⚠️ WhatsApp Bot delivery took too long or was unavailable.`, "warning", 4000);
-      return false; // Crucial: NEVER open WhatsApp Web automatically when bot is active!
+      showFloatingToast(`⚠️ WhatsApp Bot delivery unavailable. Opening WhatsApp Direct...`, "warning", 3500);
+      // Fall through directly to 1-Click WhatsApp fallback below!
     }
   }
 
   // --- UNIVERSAL 1-CLICK WHATSAPP FALLBACK (User-Initiated Click Only) ---
-  // If this was called silently in the background without user clicking a button, NEVER open popups or redirect:
+  // If this was called silently in the background without user clicking a button, do not pop open:
   if (!btnEl && !force1Click) {
+    showFloatingToast(`📲 WhatsApp ready: Click 'WhatsApp' button in bill modal to send`, "info", 4500);
     return false;
   }
 
@@ -9774,17 +9995,17 @@ function renderHistoryTableRows(records) {
           : `<span class="badge-status ${badgeClass}">${status}</span>`}
       </td>
       <td class="actions-cell">
-        ${convertEstimateBtn}
-        ${balanceQrBtn}
-        <button class="action-btn repeat" onclick="repeatInvoice('${inv.id}')" title="Repeat Bill (Clone to New Invoice)"><i class="fa-solid fa-arrows-rotate" style="color: #6366f1;"></i></button>
-        <button class="action-btn edit" onclick="editSavedInvoice('${inv.id}')" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>
-        <button class="action-btn print" onclick="printSavedInvoice('${inv.id}')" title="Print A4"><i class="fa-solid fa-print"></i></button>
+        <button class="action-btn share btn-whatsapp primary-wa-action" onclick="shareInvoiceToWhatsApp('${inv.id}', this)" title="Send Invoice & PDF via WhatsApp (1-Click)" style="background: #16a34a !important; color: #ffffff !important; font-weight: 700; width: 30px; height: 30px; border-radius: 6px; box-shadow: 0 1px 3px rgba(22, 163, 74, 0.35);"><i class="fa-brands fa-whatsapp" style="font-size: 15px; color: #ffffff !important;"></i></button>
+        <button class="action-btn print" onclick="printSavedInvoice('${inv.id}')" title="Print A4 Bill"><i class="fa-solid fa-print"></i></button>
+        <button class="action-btn edit" onclick="editSavedInvoice('${inv.id}')" title="Edit Bill"><i class="fa-solid fa-pen-to-square"></i></button>
         <button class="action-btn print" onclick="downloadSavedInvoicePdf('${inv.id}', this)" title="Download PDF"><i class="fa-solid fa-file-pdf text-rose"></i></button>
+        ${balanceQrBtn}
+        ${convertEstimateBtn}
         <button class="action-btn print" onclick="printSavedInvoiceThermal('${inv.id}')" title="Print Thermal POS"><i class="fa-solid fa-receipt"></i></button>
-        <button class="action-btn share btn-whatsapp" onclick="shareInvoiceToWhatsApp('${inv.id}', this)" title="Share PDF via WhatsApp"><i class="fa-brands fa-whatsapp" style="color: #16a34a;"></i></button>
-        <button class="action-btn share btn-telegram" onclick="shareInvoiceToTelegram('${inv.id}', this)" title="Share PDF to Telegram (@fishbilling_bot_bot)"><i class="fa-brands fa-telegram" style="color: #0284c7;"></i></button>
-        <button class="action-btn share" onclick="openUniversalInvoiceShareModal('${inv.id}')" title="Universal Share (Nearby / Email / Copy / Native)"><i class="fa-solid fa-share-nodes" style="color: #0891b2;"></i></button>
-        <button class="action-btn delete" onclick="deleteSavedInvoice('${inv.id || inv.invoiceNo}')" title="Delete"><i class="fa-solid fa-trash"></i></button>
+        <button class="action-btn repeat" onclick="repeatInvoice('${inv.id}')" title="Repeat Bill (Clone to New Invoice)"><i class="fa-solid fa-arrows-rotate" style="color: #6366f1;"></i></button>
+        <button class="action-btn share btn-telegram" onclick="shareInvoiceToTelegram('${inv.id}', this)" title="Share PDF to Telegram"><i class="fa-brands fa-telegram" style="color: #0284c7;"></i></button>
+        <button class="action-btn share" onclick="openUniversalInvoiceShareModal('${inv.id}')" title="Universal Share"><i class="fa-solid fa-share-nodes" style="color: #0891b2;"></i></button>
+        <button class="action-btn delete" onclick="deleteSavedInvoice('${inv.id || inv.invoiceNo}')" title="Delete Bill"><i class="fa-solid fa-trash"></i></button>
       </td>
     `;
     elements.historyInvoicesBody.appendChild(tr);
@@ -14252,7 +14473,12 @@ window.openInvoiceVerificationModal = function(invoiceNo, rawUrl = "") {
   };
 
   // 1. Check Cancelled Registry
-  const cancelledInvoices = JSON.parse(localStorage.getItem("cancelled_invoices") || "[]");
+  let cancelledInvoices = [];
+  try {
+    cancelledInvoices = JSON.parse(localStorage.getItem("cancelled_invoices") || "[]");
+  } catch (e) {
+    cancelledInvoices = [];
+  }
   let cancMatch = null;
   if (qId) {
     cancMatch = cancelledInvoices.find(c => c && (
@@ -14788,11 +15014,11 @@ window.updateDashboardStats = updateDashboardOverview;
 window.toggleDashboardScreenFit = function() {
   const dash = document.getElementById('view-dashboard');
   if (!dash) return;
-  const isScrollMode = dash.classList.toggle('dashboard-scroll-mode');
+  const isFitted = dash.classList.toggle('dashboard-fitted-mode');
   try {
-    localStorage.setItem('aaryan_dashboard_view_mode', isScrollMode ? 'scroll' : 'fitted');
+    localStorage.setItem('aaryan_dashboard_view_mode', isFitted ? 'fitted' : 'normal');
   } catch (e) {}
-  updateDashboardFitButton(!isScrollMode);
+  updateDashboardFitButton(isFitted);
 
   if (typeof salesChartInstance !== 'undefined' && salesChartInstance) {
     salesChartInstance.resize();
@@ -14801,7 +15027,7 @@ window.toggleDashboardScreenFit = function() {
     gstChartInstance.resize();
   }
   if (typeof showToast === 'function') {
-    showToast(!isScrollMode ? "Dynamic Screen-Fit Active: Dashboard fitted to screen" : "Standard Scroll View Active", "info");
+    showToast(isFitted ? "Compact Fitted View Active" : "Full Dashboard View Active", "info");
   }
 };
 
@@ -14813,13 +15039,13 @@ function updateDashboardFitButton(isFitted) {
   if (isFitted) {
     btn.classList.add('btn-cyan');
     btn.classList.remove('btn-secondary');
-    if (icon) icon.className = 'fa-solid fa-expand';
-    if (label) label.textContent = 'Fitted View';
+    if (icon) icon.className = 'fa-solid fa-compress';
+    if (label) label.textContent = 'Full View';
   } else {
     btn.classList.remove('btn-cyan');
     btn.classList.add('btn-secondary');
-    if (icon) icon.className = 'fa-solid fa-compress';
-    if (label) label.textContent = 'Scroll View';
+    if (icon) icon.className = 'fa-solid fa-expand';
+    if (label) label.textContent = 'Fit Screen';
   }
 }
 
@@ -14827,12 +15053,12 @@ function initDashboardScreenFit() {
   try {
     const dash = document.getElementById('view-dashboard');
     const savedMode = localStorage.getItem('aaryan_dashboard_view_mode');
-    if (savedMode === 'scroll') {
-      if (dash) dash.classList.add('dashboard-scroll-mode');
-      updateDashboardFitButton(false);
-    } else {
-      if (dash) dash.classList.remove('dashboard-scroll-mode');
+    if (savedMode === 'fitted') {
+      if (dash) dash.classList.add('dashboard-fitted-mode');
       updateDashboardFitButton(true);
+    } else {
+      if (dash) dash.classList.remove('dashboard-fitted-mode');
+      updateDashboardFitButton(false);
     }
   } catch (e) {}
 

@@ -30,11 +30,18 @@
       "invoice_utils_v5.js",
       "index.css",
       "lord_ganesha.jpg",
+      "lord_hanuman.jpg",
+      "rallis_logo.png",
+      "signature.png",
       "manifest.json",
       "electron-main.js",
       "mqtt.min.js",
       "jsqr.min.js"
     ],
+    "win": {
+      "target": ["nsis", "portable"],
+      "icon": "lord_ganesha.jpg"
+    },
     "mac": {
       "category": "public.app-category.finance",
       "target": ["dmg", "zip"],
