@@ -69,7 +69,7 @@
       } catch (e) {}
     }
     // Build Version Enforcement: Clears stale caches when new build is deployed
-    window.__APP_BUILD_VERSION__ = "v403_whatsapp_reliability_qr_hardened";
+    window.__APP_BUILD_VERSION__ = "v404_fix_all_issues";
     try {
       const storedBuild = localStorage.getItem("aaryan_app_build_version");
       if (storedBuild !== window.__APP_BUILD_VERSION__) {
@@ -80,12 +80,9 @@
       }
     } catch (e) {}
   </script>
-  <!-- High-Speed Google Cloud Connection Pre-warming -->
-  <link rel="preconnect" href="https://script.google.com" crossorigin>
-  <link rel="dns-prefetch" href="https://script.google.com">
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="index.css?v=402_dashboard_layout_reorganized">
-  <script src="invoice_utils_v5.js?v=338_paid_reminder_symbol_fix"></script>
+  <link rel="stylesheet" href="index.css?v=404_fix_all_issues">
+  <script src="invoice_utils_v5.js?v=404_fix_all_issues"></script>
 </head>
 <body>
   <!-- HIGH-END LOGIN / LOCK SCREEN OVERLAY (Enforced by default for security) -->
@@ -1575,9 +1572,8 @@
                     <th>INVOICE #</th>
                     <th>DATE</th>
                     <th>CUSTOMER</th>
-                    <th style="text-align: right; display: none;">TAXABLE VALUE</th>
-                    <th style="text-align: right; display: none;">TAX RATE</th>
-                    <th style="text-align: right; display: none;">TAX AMOUNT</th>
+                    <th style="text-align: right;">TAXABLE VALUE</th>
+                    <th style="text-align: right;">TAX AMOUNT</th>
                     <th style="text-align: right;">TOTAL AMOUNT</th>
                   </tr>
                 </thead>
@@ -1585,9 +1581,8 @@
                 <tfoot>
                   <tr style="font-weight: 700; background: #f8fafc;">
                     <td colspan="3">TOTALS</td>
-                    <td id="report-total-taxable" style="text-align: right; display: none;">₹ 0.00</td>
-                    <td style="display: none;">-</td>
-                    <td id="report-total-tax" style="text-align: right; display: none;">₹ 0.00</td>
+                    <td id="report-total-taxable" style="text-align: right;">₹ 0.00</td>
+                    <td id="report-total-tax" style="text-align: right;">₹ 0.00</td>
                     <td id="report-total-grand" style="text-align: right; color: var(--primary-teal);">₹ 0.00</td>
                   </tr>
                 </tfoot>

@@ -20,6 +20,7 @@ const ALLOWED_UI_SESSION_KEYS = new Set([
   "saved_password",
   "cancelled_invoices",
   "deleted_invoice_ids",
+  "recent_product_mutations",
   "aaryan_app_build_version"
 ]);
 
@@ -1810,36 +1811,7 @@ function formatTaxValue(val) {
 // --- INITIALIZE SPA DASHBOARD ---
 function initializeApp() {
 
-  // Auto-reconciliation: Ensure prod-1 reflects actual remaining stock (0 units after Invoice #0020 of 108 units and #0021 of 19 units)
-  try {
-    const rawProds = localStorage.getItem("products");
-    if (rawProds) {
-      const parsedProds = JSON.parse(rawProds);
-      if (Array.isArray(parsedProds)) {
-        let changedStock = false;
-        parsedProds.forEach(p => {
-          if (p && p.id === "prod-1") {
-            p.discount = 45.0;
-            p.rate = 3600.0;
-            delete p.isSeed;
-            // Only reconcile legacy hardcoded stock values (127 or 130) if invoices consumed them
-            if (p.stock === 127 || p.stock === 130) {
-              p.stock = 0;
-              p.status = "Out of Stock";
-              p.updatedAt = new Date().toISOString();
-              changedStock = true;
-            }
-          }
-        });
-        if (changedStock) {
-          localStorage.setItem("products", JSON.stringify(parsedProds));
-          if (typeof pushDirectToGoogleDatabase === "function") {
-            try { pushDirectToGoogleDatabase("save_products", { products: parsedProds }); } catch(e){}
-          }
-        }
-      }
-    }
-  } catch (e) {}
+  // Product data is now managed exclusively via the Google Cloud Master Database
 
   seedDatabasesIfEmpty();
   loadAllDatabases();
@@ -1894,19 +1866,15 @@ function initializeApp() {
       if (typeof window.triggerDatabaseSync === 'function') {
         await window.triggerDatabaseSync();
       }
-      if (true) {
-        updateCloudSyncBadge("synced");
-        if (btnEl) {
-          btnEl.innerHTML = `<i class="fa-solid fa-check text-success"></i> Synced to Google Drive!`;
-          setTimeout(() => {
-            btnEl.innerHTML = origHtml;
-            btnEl.disabled = false;
-          }, 3000);
-        }
-        showFloatingToast(`☁️ All data synced to your Google Drive Master Spreadsheet!`);
-      } else {
-        throw new Error(data?.error || "Sync failed");
+      updateCloudSyncBadge("synced");
+      if (btnEl) {
+        btnEl.innerHTML = `<i class="fa-solid fa-check text-success"></i> Synced to Google Drive!`;
+        setTimeout(() => {
+          btnEl.innerHTML = origHtml;
+          btnEl.disabled = false;
+        }, 3000);
       }
+      showFloatingToast(`☁️ All data synced to your Google Drive Master Spreadsheet!`);
     } catch (err) {
       console.warn("Manual Google Drive sync error:", err);
       updateCloudSyncBadge("offline");
@@ -6092,6 +6060,15 @@ function calculateSummaryAndTable() {
   if (elements.sumSgstRow) elements.sumSgstRow.style.display = 'none';
   if (elements.sumIgstRow) elements.sumIgstRow.style.display = 'none';
 
+  // Re-show the appropriate tax rows based on intra/inter-state supply
+  const hasAnyGst = currentInvoice.items.some(i => parseFloat(i.taxRate || i.gstRate || i.gst || 0) > 0);
+  if (isLocal) {
+    if (elements.sumCgstRow && (totalCgst > 0 || hasAnyGst)) elements.sumCgstRow.style.display = 'flex';
+    if (elements.sumSgstRow && (totalSgst > 0 || hasAnyGst)) elements.sumSgstRow.style.display = 'flex';
+  } else {
+    if (elements.sumIgstRow && (totalIgst > 0 || hasAnyGst)) elements.sumIgstRow.style.display = 'flex';
+  }
+
   const rawGrandTotal = breakdown.rawGrandTotal;
   const roundedGrandTotal = breakdown.roundedGrandTotal;
   const roundOff = breakdown.roundOff;
@@ -6591,14 +6568,8 @@ window.saveCurrentInvoiceRecord = async function(actionType = 'save_only', btnEl
       // Fully automated: saves invoice, compiles PDF, syncs Google Drive & auto-dispatches via WhatsApp bot silently in background
       showFloatingToast(`✅ Invoice #${invoiceRecord.invoiceNo} successfully created & saved!`);
 
-      // Trigger automatic silent WhatsApp dispatch in background
-      try {
-        if (typeof autoDispatchInvoiceToWhatsApp === 'function') {
-          autoDispatchInvoiceToWhatsApp(invoiceRecord).catch(e => console.warn("Auto WhatsApp dispatch note:", e));
-        }
-      } catch (waErr) {
-        console.warn("Auto WhatsApp trigger error:", waErr);
-      }
+      // WhatsApp dispatch is handled by the background async worker above (line ~6537)
+      // which includes the precomputed PDF — no duplicate call needed here
 
       if (typeof openInvoiceSuccessModal === 'function') {
         openInvoiceSuccessModal(invoiceRecord);
@@ -7362,7 +7333,12 @@ function playSuccessChime() {
 }
 
 // --- ADVANCED GLASSMORPHIC TOAST NOTIFICATION SYSTEM ---
-function showFloatingToast(message, type = "success") {
+function showFloatingToast(message, type = "success", duration = 4500) {
+  // Handle callers that pass duration as the second arg (e.g. showFloatingToast("msg", 5000))
+  if (typeof type === 'number') {
+    duration = type;
+    type = "success";
+  }
   let toastContainer = document.getElementById("app-floating-toast-container");
   if (!toastContainer) {
     toastContainer = document.createElement("div");
@@ -7438,7 +7414,7 @@ function showFloatingToast(message, type = "success") {
     toast.style.opacity = "0";
     toast.style.transform = "translateY(15px) scale(0.95)";
     setTimeout(() => toast.remove(), 350);
-  }, 4500);
+  }, duration);
 }
 
 function savePartiesDb() {
@@ -11606,16 +11582,15 @@ window.runSalesReport = function() {
       <td style="font-weight: 700; color: var(--primary-teal);">#${inv.invoiceNo}</td>
       <td>${formatInputDateString(inv.invoiceDate)}</td>
       <td style="font-weight: 600;">${inv.customerName}</td>
-      <td style="text-align: right; display: none;">₹ ${formatCurrency(invoiceTaxable)}</td>
-      <td style="text-align: right; display: none;">0.00%</td>
-      <td style="text-align: right; display: none;">₹ 0.00</td>
+      <td style="text-align: right;">₹ ${formatCurrency(invoiceTaxable)}</td>
+      <td style="text-align: right;">₹ ${formatCurrency(invoiceTax)}</td>
       <td style="text-align: right; font-weight: 700; color: var(--primary-teal);">₹ ${formatCurrency(inv.total)}</td>
     `;
     elements.reportTableBody.appendChild(tr);
   });
 
   elements.reportTotalTaxable.textContent = `₹ ${formatCurrency(totalTaxable)}`;
-  elements.reportTotalTax.textContent = `₹ 0.00`;
+  elements.reportTotalTax.textContent = `₹ ${formatCurrency(totalTax)}`;
   elements.reportTotalGrand.textContent = `₹ ${formatCurrency(totalGrand)}`;
 
   // --- RENDER DYNAMIC CHARTS ---
