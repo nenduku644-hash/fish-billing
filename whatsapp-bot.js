@@ -336,23 +336,24 @@ function initMqttBridge() {
                     try {
                       const cleanB64 = String(cmd.pdfBase64).replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
                       const media = new MessageMedia('application/pdf', cleanB64, cmd.filename || 'Invoice.pdf');
-                      await safeClientSendMessage(chatId, media, { caption: sanitizeCaption(cmd.text || cmd.caption || ''), sendMediaAsDocument: true });
+                      const docCaption = sanitizeCaption(cmd.caption || `📄 ${cmd.filename || 'Tax Invoice'} - Aaryan Aqua Needs`);
+                      await safeClientSendMessage(chatId, media, { caption: docCaption, sendMediaAsDocument: true });
                       mediaSent = true;
                       console.log(`📄 WhatsApp Invoice (WITH PDF) delivered to +${cmd.phone}!`);
                     } catch (mediaErr) {
                       lastErr = mediaErr;
-                      console.warn(`⚠️ Cloud Mesh PDF media dispatch error (${mediaErr.message}), automatically falling back to text breakdown with Google Drive PDF link...`);
+                      console.warn(`⚠️ Cloud Mesh PDF media dispatch error (${mediaErr.message}), automatically ensuring text breakdown delivery...`);
                     }
                   }
 
-                  if (!mediaSent && cmd.text) {
+                  if (cmd.text) {
                     try {
                       await safeClientSendMessage(chatId, cmd.text);
                       textSent = true;
-                      console.log(`💬 WhatsApp Invoice (TEXT & DRIVE LINK) delivered to +${cmd.phone}!`);
+                      console.log(`💬 WhatsApp Invoice (GREETING & DETAILS) delivered to +${cmd.phone}!`);
                     } catch (textErr) {
                       lastErr = textErr;
-                      console.error(`❌ Cloud Mesh text fallback error to +${cmd.phone}:`, textErr.message);
+                      console.error(`❌ Cloud Mesh text dispatch error to +${cmd.phone}:`, textErr.message);
                     }
                   }
 
@@ -821,25 +822,25 @@ app.post('/api/whatsapp/send-invoice', async (req, res) => {
     try {
       const cleanB64 = String(pdfBase64).replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
       const media = new MessageMedia('application/pdf', cleanB64, filename || 'Invoice.pdf');
-      const docCaption = sanitizeCaption(caption || text || '');
+      const docCaption = sanitizeCaption(caption || `📄 ${filename || 'Tax Invoice'} - Aaryan Aqua Needs`);
       await safeClientSendMessage(chatId, media, { caption: docCaption, sendMediaAsDocument: true });
       mediaSent = true;
       console.log(`📄 WhatsApp Invoice PDF document successfully delivered to +${phone}!`);
     } catch (mediaErr) {
       lastErr = mediaErr;
-      console.warn(`⚠️ WhatsApp PDF media dispatch note for +${phone} (${mediaErr.message}). Automatically delivering complete text breakdown & PDF link fallback...`);
+      console.warn(`⚠️ WhatsApp PDF media dispatch note for +${phone} (${mediaErr.message}). Automatically delivering complete text breakdown...`);
     }
   }
 
-  // 2. If media was not sent (or failed) and text was provided, guarantee text delivery
-  if (!mediaSent && text) {
+  // 2. Deliver complete text greeting, salutations & items breakdown
+  if (text) {
     try {
       await safeClientSendMessage(chatId, text);
       textSent = true;
       console.log(`💬 WhatsApp Invoice complete text breakdown & Drive PDF link delivered to +${phone}!`);
     } catch (textErr) {
       lastErr = textErr;
-      console.error(`❌ Send text fallback error to +${phone}:`, textErr.message);
+      console.error(`❌ Send text error to +${phone}:`, textErr.message);
     }
   }
 

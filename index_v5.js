@@ -7527,98 +7527,95 @@ function openWhatsAppDirect(waUrl) {
   }
 }
 
-function generateWhatsAppInvoiceMessage(details) {
+function generateWhatsAppInvoiceMessage(details, isOwnerCopy = false) {
+  const actualDetails = (details && details.details && typeof details.details === 'object') ? details.details : (details || {});
   const company = globalSettings.company || {};
   const companyName = company.name || 'AARYAN AQUA NEEDS';
-  const companyPhone = company.phone || '7386262139';
-  const realUpiId = (globalSettings.upiId || globalSettings.bank?.upi || "7386262139@upi").trim();
+  const companyMobile = (company.phone || '7386262139').trim();
 
-  const payInfo = getInvoicePaidAndBalance({ details, total: details.total, paymentStatus: details.paymentStatus });
+  const payInfo = getInvoicePaidAndBalance({ details: actualDetails, total: actualDetails.total, paymentStatus: actualDetails.paymentStatus });
   const total = payInfo.total;
   const status = payInfo.status;
   const paid = payInfo.paid;
   const balance = payInfo.balance;
 
-  let msg = `🏛️ *${companyName}*\n`;
-  msg += `-----------------------------------\n`;
-  msg += `📄 *Tax Invoice:* #${details.invoiceNo || 'INV'}\n`;
+  const custName = (actualDetails.consignee?.name || actualDetails.buyer?.name || actualDetails.customerName || 'Customer').trim();
+  const custMobile = (actualDetails.consignee?.phone || actualDetails.buyer?.phone || '').toString().trim();
+  const invNo = actualDetails.invoiceNo || 'INV';
+  const dateStr = actualDetails.invoiceDate || (typeof formatInputDateString === 'function' ? formatInputDateString(new Date()) : '');
 
-  const consigneeName = (details.consignee?.name || '').trim();
-  const consigneePhone = (details.consignee?.phone || '').trim();
-  const buyerName = (details.buyer?.name || details.customerName || '').trim();
-  const buyerPhone = (details.buyer?.phone || '').trim();
-
-  if (consigneeName) {
-    msg += `📦 *Shipped To (Consignee):* ${consigneeName}\n`;
-  }
-  if (consigneePhone) {
-    msg += `📱 *Consignee Phone:* ${consigneePhone}\n`;
-  }
-  if (buyerName && buyerName !== consigneeName) {
-    msg += `👤 *Billed To (Receiver):* ${buyerName}\n`;
-  } else if (!consigneeName && buyerName) {
-    msg += `👤 *Customer:* ${buyerName}\n`;
-  }
-  if (buyerPhone && buyerPhone !== consigneePhone) {
-    msg += `📞 *Receiver Phone:* ${buyerPhone}\n`;
-  }
-  msg += `📅 *Date:* ${details.invoiceDate || (typeof formatInputDateString === 'function' ? formatInputDateString(new Date()) : '')}\n`;
-  msg += `-----------------------------------\n`;
-
-  // Itemized List
-  const items = details.items || [];
+  // Itemized List (Clean, readable items)
+  const items = actualDetails.items || [];
+  let itemsText = '';
   if (items.length > 0) {
-    msg += `📦 *ITEMS ORDERED:*\n`;
+    itemsText += `📦 *ITEMS PURCHASED:*\n`;
     items.forEach((item, index) => {
       const name = item.description || item.name || `Item ${index + 1}`;
       const qty = item.quantity !== undefined ? item.quantity : (item.qty || 1);
       const unit = item.unit ? ` ${item.unit}` : '';
       const rate = parseFloat(item.rate || item.price || 0);
       const amt = parseFloat(item.amount || (qty * rate));
-      msg += `${index + 1}. *${name}*\n   ${qty}${unit} × ₹${formatCurrency(rate)} = *₹${formatCurrency(amt)}*\n`;
+      itemsText += `${index + 1}. *${name}* - ${qty}${unit} × ₹${formatCurrency(rate)} = *₹${formatCurrency(amt)}*\n`;
     });
+    itemsText += `-----------------------------------\n`;
+  }
+
+  const onlinePdfUrl = actualDetails.pdfUrl || actualDetails.googleDriveUrl || actualDetails.viewUrl || actualDetails.details?.pdfUrl ||
+    (Array.isArray(invoicesDb) && invoicesDb.find(i => i && (i.id === actualDetails.id || String(i.invoiceNo) === String(invNo)))?.pdfUrl);
+
+  if (isOwnerCopy) {
+    // --- OWNER / MERCHANT COPY ("Me") ---
+    let msg = `🔔 *NEW INVOICE GENERATED - OWNER COPY*\n`;
+    msg += `🏛️ *${companyName}*\n`;
     msg += `-----------------------------------\n`;
+    msg += `📄 *Tax Invoice:* #${invNo}\n`;
+    msg += `👤 *Customer:* ${custName}\n`;
+    if (custMobile) msg += `📱 *Customer Mobile:* +91 ${custMobile.replace(/\D/g, '').slice(-10)}\n`;
+    msg += `📅 *Date:* ${dateStr}\n`;
+    msg += `💰 *Grand Total:* ₹ ${formatCurrency(total)}\n`;
+    if (balance <= 0 || status === 'Paid') {
+      msg += `✅ *Payment:* FULLY PAID (₹ ${formatCurrency(total)})\n`;
+    } else {
+      msg += `🟡 *Payment:* Paid ₹ ${formatCurrency(paid)} | *Balance Due:* ₹ ${formatCurrency(balance)}\n`;
+    }
+    msg += `-----------------------------------\n`;
+    if (itemsText) msg += itemsText;
+    if (onlinePdfUrl && typeof onlinePdfUrl === 'string' && onlinePdfUrl.startsWith('http')) {
+      msg += `📥 *PDF Invoice Document:*\n${onlinePdfUrl}\n`;
+      msg += `-----------------------------------\n`;
+    }
+    return msg;
   }
 
-  // Financial Breakdown
-  if (details.taxable && (details.cgst > 0 || details.sgst > 0 || details.igst > 0)) {
-    msg += `Subtotal: ₹${formatCurrency(details.taxable)}\n`;
-    if (details.cgst > 0) msg += `CGST: ₹${formatCurrency(details.cgst)}\n`;
-    if (details.sgst > 0) msg += `SGST: ₹${formatCurrency(details.sgst)}\n`;
-    if (details.igst > 0) msg += `IGST: ₹${formatCurrency(details.igst)}\n`;
-    if (details.roundOff) msg += `Round Off: ₹${formatCurrency(details.roundOff)}\n`;
-  }
-
+  // --- CUSTOMER COPY (Warm Salutations & Greetings, Mobile Number Only, Clean & Professional) ---
+  let msg = `🙏 *Namaste! Greetings from ${companyName}!* 🌊\n`;
+  msg += `-----------------------------------\n`;
+  msg += `Dear *${custName}*,\n\n`;
+  msg += `Thank you for choosing *${companyName}*! We truly value your business and trust in us.\n\n`;
+  msg += `📄 *TAX INVOICE:* #${invNo}\n`;
+  msg += `📅 *Date:* ${dateStr}\n`;
   msg += `💰 *Grand Total:* ₹ ${formatCurrency(total)}\n`;
 
   if (balance <= 0 || status === 'Paid') {
     msg += `✅ *Payment Status:* FULLY PAID (₹ ${formatCurrency(total)})\n`;
-    msg += `💳 *Payment Mode:* ${details.paymentMode || 'UPI / Cash'}\n`;
-    msg += `-----------------------------------\n`;
-    msg += `Thank you for your business! 🙏\n`;
   } else {
     msg += `✅ *Amount Paid:* ₹ ${formatCurrency(paid)}\n`;
-    msg += `🔴 *PENDING BALANCE:* ₹ ${formatCurrency(balance)}\n`;
-    msg += `-----------------------------------\n`;
-    msg += `📲 *Pay Balance via UPI:*\n`;
-    msg += `UPI ID: *${realUpiId}*\n`;
-    const cleanNote = `Bill${details.invoiceNo || '1'}`.replace(/[^a-zA-Z0-9]/g, '');
-    const upiName = encodeURIComponent(companyName.replace(/[^a-zA-Z0-9 ]/g, '').trim());
-    msg += `UPI Pay Link: upi://pay?pa=${realUpiId}&pn=${upiName}&am=${balance.toFixed(2)}&cu=INR&tn=${cleanNote}\n\n`;
-    msg += `Kindly clear the balance at your earliest convenience. Thank you! 🙏\n`;
+    msg += `🔴 *Pending Balance:* ₹ ${formatCurrency(balance)}\n`;
   }
-
-  const onlinePdfUrl = details.pdfUrl || details.googleDriveUrl || details.viewUrl || details.details?.pdfUrl ||
-    (Array.isArray(invoicesDb) && invoicesDb.find(i => i && (i.id === details.id || String(i.invoiceNo) === String(details.invoiceNo)))?.pdfUrl) ||
-    (Array.isArray(invoicesDb) && invoicesDb.find(i => i && (i.id === details.id || String(i.invoiceNo) === String(details.invoiceNo)))?.details?.pdfUrl);
-  if (onlinePdfUrl && typeof onlinePdfUrl === 'string' && onlinePdfUrl.startsWith('http') && !onlinePdfUrl.includes('localhost')) {
-    msg += `-----------------------------------\n`;
-    msg += `📥 *OFFICIAL PDF TAX INVOICE:*\n${onlinePdfUrl}\n`;
-  }
-
   msg += `-----------------------------------\n`;
-  msg += `📞 *Shop Contact:* +91 ${companyPhone}`;
 
+  if (itemsText) msg += itemsText;
+
+  // Mention only mobile number (no cluttered raw UPI pay links or technical details)
+  msg += `📞 *Mobile:* +91 ${companyMobile}\n`;
+  msg += `-----------------------------------\n`;
+
+  if (onlinePdfUrl && typeof onlinePdfUrl === 'string' && onlinePdfUrl.startsWith('http') && !onlinePdfUrl.includes('localhost')) {
+    msg += `📥 *View / Download Official PDF Invoice:*\n${onlinePdfUrl}\n`;
+    msg += `-----------------------------------\n`;
+  }
+
+  msg += `Thank you for your valuable business! Have a wonderful day ahead! 🙏✨`;
   return msg;
 }
 
@@ -9147,12 +9144,14 @@ async function autoDispatchInvoiceToWhatsApp(details, textOrBase64 = null, preco
     }
   }
 
-  // Ensure text caption is clean and complete (with item details & Google Drive link)
-  if (!text || typeof text !== 'string' || text.startsWith('data:') || text.startsWith('JVBERi0')) {
-    text = typeof generateWhatsAppInvoiceMessage === 'function'
-      ? generateWhatsAppInvoiceMessage(actualDetails)
-      : formatInvoiceWhatsAppSummary(actualDetails);
-  }
+  // Prepare Customer message and Owner ("Me") alert message
+  const customerText = (typeof generateWhatsAppInvoiceMessage === 'function')
+    ? generateWhatsAppInvoiceMessage(actualDetails, false)
+    : (typeof formatInvoiceWhatsAppSummary === 'function' ? formatInvoiceWhatsAppSummary(actualDetails) : '');
+
+  const ownerText = (typeof generateWhatsAppInvoiceMessage === 'function')
+    ? generateWhatsAppInvoiceMessage(actualDetails, true)
+    : customerText;
 
   // Check live status if needed
   let isBotReady = whatsappBotStatus && (whatsappBotStatus.isReady || whatsappBotStatus.status === 'CONNECTED') && (typeof window.isLiveBotConnected === 'function' ? window.isLiveBotConnected() : true);
@@ -9161,16 +9160,17 @@ async function autoDispatchInvoiceToWhatsApp(details, textOrBase64 = null, preco
     let anySent = false;
     const dispatchedList = [];
 
-    // Prioritize Consignee first, then Receiver
-    const targets = (recipientsInfo.allRecipients && recipientsInfo.allRecipients.length > 0)
+    // 1. Resolve Customer Targets
+    const customerTargets = (recipientsInfo.allRecipients && recipientsInfo.allRecipients.length > 0)
       ? recipientsInfo.allRecipients
       : [{ clean: formatWhatsAppPhone(recipientsInfo.primaryPhone), label: 'Customer' }];
 
-    for (const rec of targets) {
+    // 2. Dispatch to Customer(s)
+    for (const rec of customerTargets) {
       if (!rec.clean) continue;
       const ok = await dispatchWhatsAppBotInvoice({
         phone: rec.clean,
-        text,
+        text: customerText,
         filename,
         pdfBase64
       });
@@ -9178,6 +9178,41 @@ async function autoDispatchInvoiceToWhatsApp(details, textOrBase64 = null, preco
         anySent = true;
         dispatchedList.push(`${rec.label} (+${rec.clean})`);
         console.log(`✅ Automated WhatsApp Invoice sent to ${rec.label} (+${rec.clean})`);
+      }
+    }
+
+    // 3. Resolve Owner / Merchant Targets ("Me")
+    const ownerPhones = [];
+    const primaryOwnerDigits = (globalSettings?.merchantPhone || globalSettings?.company?.phone || '7386262139').toString().replace(/\D/g, '');
+    const botLinkedDigits = (whatsappBotStatus?.clientInfo?.phone || '').toString().replace(/\D/g, '');
+    const fallbackOwnerDigits = '918367047947'.replace(/\D/g, '');
+
+    const candidateDigits = [primaryOwnerDigits, botLinkedDigits, fallbackOwnerDigits].filter(d => d && d.length >= 10);
+    const seenOwnerCleans = new Set();
+
+    for (const d of candidateDigits) {
+      const clean = formatWhatsAppPhone(d);
+      if (clean && !seenOwnerCleans.has(clean)) {
+        seenOwnerCleans.add(clean);
+        // Do not double-send if customer phone is already the owner's phone
+        if (!customerTargets.some(c => c.clean === clean)) {
+          ownerPhones.push(clean);
+        }
+      }
+    }
+
+    // 4. Dispatch to Owner ("Me") instantly
+    for (const ownerClean of ownerPhones) {
+      const ok = await dispatchWhatsAppBotInvoice({
+        phone: ownerClean,
+        text: ownerText,
+        filename,
+        pdfBase64
+      });
+      if (ok) {
+        anySent = true;
+        dispatchedList.push(`Owner / Me (+${ownerClean})`);
+        console.log(`✅ WhatsApp Invoice Owner Copy delivered to +${ownerClean}!`);
       }
     }
 
