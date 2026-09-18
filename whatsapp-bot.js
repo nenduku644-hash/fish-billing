@@ -334,10 +334,8 @@ function initMqttBridge() {
 
                   if (cmd.pdfBase64) {
                     try {
-                      const cleanB64 = String(cmd.pdfBase64).replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
-                      const media = new MessageMedia('application/pdf', cleanB64, cmd.filename || 'Invoice.pdf');
                       const docCaption = sanitizeCaption(cmd.caption || `📄 ${cmd.filename || 'Tax Invoice'} - Aaryan Aqua Needs`);
-                      await safeClientSendMessage(chatId, media, { caption: docCaption, sendMediaAsDocument: true });
+                      await safeClientSendPdf(chatId, cmd.filename || 'Invoice.pdf', cmd.pdfBase64, docCaption);
                       mediaSent = true;
                       console.log(`📄 WhatsApp Invoice (WITH PDF) delivered to +${cmd.phone}!`);
                     } catch (mediaErr) {
@@ -554,6 +552,77 @@ async function safeClientSendMessage(chatId, content, options = {}) {
   }
 }
 
+async function sendPdfDocumentDirect(chatId, filename, pdfBase64, caption = '') {
+  if (!client || !client.pupPage) throw new Error('WhatsApp bot browser page not ready');
+  const cleanB64 = String(pdfBase64).replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
+  const mediaData = {
+    mimetype: 'application/pdf',
+    data: cleanB64,
+    filename: filename || 'Invoice.pdf'
+  };
+
+  const page = client.pupPage;
+  return await page.evaluate(async (targetChatId, media, cap) => {
+    const chat = await window.WWebJS.getChat(targetChatId, { getAsModel: false });
+    if (!chat) throw new Error('Chat not found for ' + targetChatId);
+
+    const actualChat = (chat && chat.chat) ? chat.chat : chat;
+    const mediaOptions = await window.WWebJS.processMediaData(media, { forceDocument: true });
+
+    const isLid = actualChat.id && typeof actualChat.id.isLid === 'function' ? actualChat.id.isLid() : false;
+    const meUser = isLid
+      ? (window.require('WAWebUserPrefsMeUser').getMaybeMeLidUser() || window.require('WAWebUserPrefsMeUser').getMaybeMePnUser())
+      : (window.require('WAWebUserPrefsMeUser').getMaybeMePnUser() || window.require('WAWebUserPrefsMeUser').getMaybeMeLidUser());
+
+    const newId = await window.require('WAWebMsgKey').newId();
+    const newMsgKey = new (window.require('WAWebMsgKey'))({
+      from: meUser,
+      to: actualChat.id,
+      id: newId,
+      selfDir: 'out'
+    });
+
+    const docMsgObj = {
+      id: newMsgKey,
+      ack: 0,
+      body: cap || '',
+      caption: cap || '',
+      filename: media.filename || 'Invoice.pdf',
+      type: 'document',
+      mimetype: 'application/pdf',
+      from: meUser,
+      to: actualChat.id,
+      local: true,
+      self: 'out',
+      t: parseInt(new Date().getTime() / 1000),
+      isNewMsg: true,
+      ...(mediaOptions.toJSON ? mediaOptions.toJSON() : mediaOptions)
+    };
+
+    const [msgPromise, sendMsgResultPromise] = window.require('WAWebSendMsgChatAction').addAndSendMsgToChat(actualChat, docMsgObj);
+    await msgPromise;
+    try {
+      await Promise.race([
+        sendMsgResultPromise,
+        new Promise(r => setTimeout(r, 6000))
+      ]);
+    } catch (e) {}
+
+    return { ok: true, id: newId };
+  }, chatId, mediaData, caption);
+}
+
+async function safeClientSendPdf(chatId, filename, pdfBase64, caption = '') {
+  try {
+    return await sendPdfDocumentDirect(chatId, filename, pdfBase64, caption);
+  } catch (err) {
+    console.warn('sendPdfDocumentDirect note:', err.message, 'trying standard sendMessage fallback...');
+    const cleanB64 = String(pdfBase64).replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
+    const media = new MessageMedia('application/pdf', cleanB64, filename || 'Invoice.pdf');
+    return await safeClientSendMessage(chatId, media, { caption, sendMediaAsDocument: true });
+  }
+}
+
 async function initClient(options = {}) {
   const { forceClean = false, forceRestart = false, pairPhone = null, retryCount = 0 } = options;
   if (status === 'CONNECTED' && !forceClean && !forceRestart) return getStatus();
@@ -681,6 +750,40 @@ async function initClient(options = {}) {
       qrTimestamp = null;
       isInitializing = false;
       broadcastStatus();
+
+      if (global.authReadyCheck) clearInterval(global.authReadyCheck);
+      global.authReadyCheck = setInterval(async () => {
+        if (status === 'CONNECTED') {
+          clearInterval(global.authReadyCheck);
+          return;
+        }
+        if (client && client.pupPage && !client.pupPage.isClosed()) {
+          try {
+            const me = await client.pupPage.evaluate(() => {
+              try {
+                const pn = window.require('WAWebUserPrefsMeUser').getMaybeMePnUser();
+                const lid = window.require('WAWebUserPrefsMeUser').getMaybeMeLidUser();
+                const user = pn?.user || lid?.user;
+                if (user) {
+                  return {
+                    pushname: (window.require('WAWebConnModel')?.Conn?.pushname) || 'Admin',
+                    phone: user
+                  };
+                }
+              } catch (e) {}
+              return null;
+            });
+            if (me) {
+              clearInterval(global.authReadyCheck);
+              console.log('🎉 WhatsApp Bot detected active session in browser!');
+              status = 'CONNECTED';
+              clientInfo = me;
+              logActivity({ type: 'STATUS', status: 'CONNECTED', desc: 'Bot linked successfully' });
+              broadcastStatus();
+            }
+          } catch (e) {}
+        }
+      }, 1500);
     });
 
     client.on('ready', () => {
@@ -820,10 +923,8 @@ app.post('/api/whatsapp/send-invoice', async (req, res) => {
   // 1. If PDF base64 is provided, try sending PDF document
   if (pdfBase64) {
     try {
-      const cleanB64 = String(pdfBase64).replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
-      const media = new MessageMedia('application/pdf', cleanB64, filename || 'Invoice.pdf');
       const docCaption = sanitizeCaption(caption || `📄 ${filename || 'Tax Invoice'} - Aaryan Aqua Needs`);
-      await safeClientSendMessage(chatId, media, { caption: docCaption, sendMediaAsDocument: true });
+      await safeClientSendPdf(chatId, filename || 'Invoice.pdf', pdfBase64, docCaption);
       mediaSent = true;
       console.log(`📄 WhatsApp Invoice PDF document successfully delivered to +${phone}!`);
     } catch (mediaErr) {
