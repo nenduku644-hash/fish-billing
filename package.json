@@ -1,6 +1,6 @@
 {
   "name": "aaryan-aqua-billing",
-  "version": "5.4.0",
+  "version": "5.3.0",
   "description": "Aaryan Aqua Needs - Professional GST Billing Application",
   "author": "Aaryan Aqua Needs",
   "main": "electron-main.js",
@@ -80,11 +80,11 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": ["universal", "x64", "arm64"]
         },
         {
           "target": "zip",
-          "arch": ["x64", "arm64"]
+          "arch": ["universal", "x64", "arm64"]
         }
       ],
       "icon": "build/icon.png",
