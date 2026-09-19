@@ -485,7 +485,7 @@ async function resolveChatId(phone) {
   if (client) {
     try {
       const numId = await client.getNumberId(digits);
-      if (numId && numId._serialized) {
+      if (numId && numId._serialized && !numId._serialized.includes('@lid')) {
         return numId._serialized;
       }
     } catch (e) {
@@ -606,7 +606,7 @@ async function safeClientSendPdf(chatId, filename, pdfBase64, caption = '') {
             media: mediaData,
             caption: cap || '',
             sendMediaAsDocument: true,
-            waitUntilMsgSent: false
+            waitUntilMsgSent: true
           };
 
           const msg = await window.WWebJS.sendMessage(actualChat, cap || '', options);
