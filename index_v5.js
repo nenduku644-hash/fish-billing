@@ -6872,16 +6872,30 @@ window.addBillingItemRow = function() {
     let desc = "";
     if (elements.billItemName && elements.billItemName.value && elements.billItemName.value.trim()) {
       desc = elements.billItemName.value.trim();
-    } else if (prod) {
-      desc = prod.description;
+    } else if (prod && prod.description) {
+      desc = prod.description.trim();
     } else if (prodId && prodId !== '__custom__') {
       desc = prodId.trim();
+    } else {
+      const smartTitle = document.getElementById("smart-picker-selected-title");
+      if (smartTitle && smartTitle.textContent && smartTitle.textContent.trim()) {
+        desc = smartTitle.textContent.trim();
+      } else {
+        const smartSearch = document.getElementById("smart-product-search");
+        if (smartSearch && smartSearch.value && smartSearch.value.trim()) {
+          desc = smartSearch.value.trim();
+        }
+      }
+    }
+
+    if (!prod && desc) {
+      prod = (window.TurboDataStore && typeof window.TurboDataStore.getProduct === 'function')
+        ? window.TurboDataStore.getProduct(desc)
+        : productsDb.find(p => p && (p.description === desc || (p.description && p.description.trim().toLowerCase() === desc.toLowerCase())));
     }
 
     if (!desc) {
       if (typeof showFloatingToast === 'function') {
-        showFloatingToast("⚠️ Please enter a product name or select from catalog!", "warning");
-      } else {
         showFloatingToast("⚠️ Please enter a product name or select from catalog!", "warning");
       }
       if (elements.billItemName) {
@@ -6904,7 +6918,7 @@ window.addBillingItemRow = function() {
     
     let rate = parseFloat(elements.billItemRate ? elements.billItemRate.value : "0");
     if (isNaN(rate) || rate <= 0) {
-      rate = prod && prod.rate ? (parseFloat(prod.rate) || 1) : 1;
+      rate = prod ? (parseFloat(prod.rate || prod.salesRate || prod.price) || 1) : 1;
     }
 
     const packVal = (elements.billItemPack ? elements.billItemPack.value.trim() : "") || (prod ? (prod.packSize || "—") : "—");
