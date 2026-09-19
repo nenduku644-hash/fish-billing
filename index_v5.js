@@ -236,8 +236,8 @@ const TurboOutboxQueue = {
       window.updateCloudSyncBadge("syncing");
     }
 
-    // High-speed parallel worker pool (concurrency = 3)
-    const CONCURRENCY = 3;
+    // High-speed parallel worker pool (concurrency = 4)
+    const CONCURRENCY = 4;
     const remaining = [];
 
     for (let i = 0; i < items.length; i += CONCURRENCY) {
@@ -1799,6 +1799,9 @@ async function pushDirectToGoogleDatabaseRaw(action, payload) {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: bodyStr,
+      mode: "cors",
+      credentials: "omit",
+      cache: "no-store",
       redirect: "follow",
       keepalive: true,
       priority: "high",
@@ -1850,6 +1853,9 @@ async function pushDirectToGoogleDatabase(action, payload, maxRetries = 2) {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: bodyStr,
+        mode: "cors",
+        credentials: "omit",
+        cache: "no-store",
         redirect: "follow",
         keepalive: true,
         priority: "high",
@@ -1874,7 +1880,7 @@ async function pushDirectToGoogleDatabase(action, payload, maxRetries = 2) {
     }
 
     if (attempt < maxRetries) {
-      const backoffMs = Math.pow(2, attempt) * 80 + Math.floor(Math.random() * 40);
+      const backoffMs = Math.pow(2, attempt) * 60 + Math.floor(Math.random() * 30);
       await new Promise(r => setTimeout(r, backoffMs));
     }
   }
