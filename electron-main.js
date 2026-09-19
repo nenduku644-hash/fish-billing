@@ -242,6 +242,51 @@ function createMenu() {
   Menu.setApplicationMenu(menu);
 }
 
+// ----------------------------------------------------------------------------
+// HIGH-SPEED NATIVE IPC COMMUNICATION & DISK CACHE BUS (< 1ms)
+// ----------------------------------------------------------------------------
+const cacheDir = path.join(app.getPath('userData'), 'fast_cache');
+try {
+  if (!fs.existsSync(cacheDir)) {
+    fs.mkdirSync(cacheDir, { recursive: true });
+  }
+} catch (e) {}
+
+ipcMain.handle('fast-save-cache', async (event, { key, data }) => {
+  try {
+    const safeKey = String(key || 'cache').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filePath = path.join(cacheDir, `${safeKey}.json`);
+    await fs.promises.writeFile(filePath, JSON.stringify(data), 'utf8');
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('fast-read-cache', async (event, { key }) => {
+  try {
+    const safeKey = String(key || 'cache').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filePath = path.join(cacheDir, `${safeKey}.json`);
+    if (fs.existsSync(filePath)) {
+      const content = await fs.promises.readFile(filePath, 'utf8');
+      return { ok: true, data: JSON.parse(content) };
+    }
+  } catch (err) {}
+  return { ok: false };
+});
+
+ipcMain.on('print-invoice', (event) => {
+  if (mainWindow) {
+    mainWindow.webContents.print();
+  }
+});
+
+ipcMain.on('open-external', (event, url) => {
+  if (url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('mailto:') || url.startsWith('tel:'))) {
+    shell.openExternal(url);
+  }
+});
+
 app.on('second-instance', () => {
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -265,3 +310,4 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
+
