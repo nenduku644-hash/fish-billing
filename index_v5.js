@@ -4774,18 +4774,9 @@ function bindBillingFormInputs() {
       const name = party.name || party.customerName || "Customer";
       const phone = party.phone || party.mobile || "";
       const address = party.address || "";
-      // Calculate total customer outstanding balance across past invoices
-      let partyDue = 0;
-      let billCount = 0;
-      invoices.forEach(inv => {
-        const d = inv.details || inv;
-        const buyer = d.buyer || inv.buyer || {};
-        const bName = String(buyer.name || inv.customerName || d.customerName || "").trim().toLowerCase();
-        if (bName && bName === name.trim().toLowerCase()) {
-          partyDue += Number(d.balanceDue || inv.balanceDue || 0);
-          billCount++;
-        }
-      });
+      const pBal = TurboDataStore.getPartyBalance(name);
+      let partyDue = pBal.balance;
+      let billCount = pBal.count;
 
       partyItems.push({
         type: 'party',
@@ -10786,16 +10777,10 @@ window.filterInvoicesByStatus = async function() {
   const query = elements.searchHistoryInput ? elements.searchHistoryInput.value.toLowerCase().trim() : "";
 
   let filtered = [];
-  if (window.AaryanDB && typeof window.AaryanDB.searchInvoicesCursor === 'function' && query) {
-    filtered = await window.AaryanDB.searchInvoicesCursor(query, 500);
+  if (query) {
+    filtered = TurboDataStore.searchInvoices(query, 500);
   } else {
     filtered = invoicesDb || [];
-    if (query) {
-      filtered = filtered.filter(inv => 
-        (inv.invoiceNo && String(inv.invoiceNo).toLowerCase().includes(query)) || 
-        (inv.customerName && String(inv.customerName).toLowerCase().includes(query))
-      );
-    }
   }
 
   // Filter by document type: 'invoice' vs 'estimate'
@@ -11011,10 +10996,10 @@ function renderHistoryTableRows(records) {
 
 let searchHistoryDebounce = null;
 elements.searchHistoryInput.addEventListener("input", () => {
-  if (searchHistoryDebounce) clearTimeout(searchHistoryDebounce);
-  searchHistoryDebounce = setTimeout(() => {
+  if (searchHistoryDebounce) cancelAnimationFrame(searchHistoryDebounce);
+  searchHistoryDebounce = requestAnimationFrame(() => {
     window.filterInvoicesByStatus();
-  }, 100);
+  });
 });
 
 window.editSavedInvoice = function(id) {
@@ -12164,17 +12149,10 @@ window.deleteProductRowDb = function(id) {
 };
 
 window.filterProductsByStockStatus = function() {
-  const status = document.getElementById("filter-stock-status").value;
-  const searchQuery = elements.searchProductsInput.value.toLowerCase().trim();
+  const searchQuery = elements.searchProductsInput ? elements.searchProductsInput.value.toLowerCase().trim() : "";
+  const status = elements.filterStockStatus ? elements.filterStockStatus.value : "all";
 
-  let filtered = productsDb;
-
-  if (searchQuery) {
-    filtered = filtered.filter(p => 
-      (p.description && p.description.toLowerCase().includes(searchQuery)) || 
-      (p.hsn && p.hsn.toLowerCase().includes(searchQuery))
-    );
-  }
+  let filtered = searchQuery ? TurboDataStore.searchProducts(searchQuery, 300) : (productsDb || []);
 
   if (status === "instock") {
     filtered = filtered.filter(p => (p.stock !== undefined ? parseInt(p.stock, 10) : 0) > 10);
@@ -12192,10 +12170,10 @@ window.filterProductsByStockStatus = function() {
 
 let searchProductsDebounce = null;
 elements.searchProductsInput.addEventListener("input", () => {
-  if (searchProductsDebounce) clearTimeout(searchProductsDebounce);
-  searchProductsDebounce = setTimeout(() => {
+  if (searchProductsDebounce) cancelAnimationFrame(searchProductsDebounce);
+  searchProductsDebounce = requestAnimationFrame(() => {
     filterProductsByStockStatus();
-  }, 100);
+  });
 });
 
 // --- PARTIES DIALOG MODALS & CARDS ---
