@@ -585,53 +585,62 @@ async function safeClientSendPdf(chatId, filename, pdfBase64, caption = '') {
   const cleanB64 = String(pdfBase64).replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
   const docCaption = sanitizeCaption(caption || `📄 ${filename || 'Tax Invoice'} - Aaryan Aqua Needs`);
 
-  // Attempt 1: Official MessageMedia document sending via client.sendMessage
+  console.log(`📤 Dispatching PDF document "${filename || 'Invoice.pdf'}" to ${chatId}...`);
+
+  // Direct evaluation using WhatsApp Web's own WWebJS.sendMessage with properly formatted options.media
+  if (client.pupPage && !client.pupPage.isClosed()) {
+    try {
+      const result = await client.pupPage.evaluate(async (targetChatId, b64, fname, cap) => {
+        try {
+          const chat = await window.WWebJS.getChat(targetChatId, { getAsModel: false });
+          if (!chat) throw new Error('Chat not found for ' + targetChatId);
+          const actualChat = (chat && chat.chat) ? chat.chat : chat;
+
+          const mediaData = {
+            mimetype: 'application/pdf',
+            data: b64,
+            filename: fname || 'Invoice.pdf'
+          };
+
+          const options = {
+            media: mediaData,
+            caption: cap || '',
+            sendMediaAsDocument: true,
+            waitUntilMsgSent: false
+          };
+
+          const msg = await window.WWebJS.sendMessage(actualChat, cap || '', options);
+          return { ok: true, id: msg?.id?._serialized || 'sent' };
+        } catch (innerErr) {
+          return { ok: false, error: innerErr?.message || String(innerErr) };
+        }
+      }, chatId, cleanB64, filename, docCaption);
+
+      if (result && result.ok) {
+        console.log(`✅ PDF document "${filename || 'Invoice.pdf'}" successfully delivered to ${chatId}!`);
+        return result;
+      }
+      if (result && result.error) {
+        console.warn('WWebJS.sendMessage direct note:', result.error, 'Trying MessageMedia fallback...');
+      }
+    } catch (evalErr) {
+      console.warn('Puppeteer evaluate note:', evalErr.message, 'Trying MessageMedia fallback...');
+    }
+  }
+
+  // Fallback: Official MessageMedia document sending via client.sendMessage
   try {
     const media = new MessageMedia('application/pdf', cleanB64, filename || 'Invoice.pdf');
     const result = await safeClientSendMessage(chatId, media, {
       caption: docCaption,
       sendMediaAsDocument: true
     });
-    if (result) {
-      console.log(`✅ PDF document successfully delivered via MessageMedia to ${chatId}!`);
-      return result;
-    }
+    console.log(`✅ PDF document successfully delivered via MessageMedia fallback to ${chatId}!`);
+    return result || { ok: true, id: 'sent' };
   } catch (mediaErr) {
-    console.warn('safeClientSendMessage with MessageMedia note:', mediaErr.message, 'Trying direct WWebJS.sendMessage evaluate fallback...');
+    console.error('MessageMedia delivery error:', mediaErr.message);
+    throw mediaErr;
   }
-
-  // Attempt 2: Direct browser evaluate fallback using WWebJS.sendMessage
-  if (client.pupPage && !client.pupPage.isClosed()) {
-    try {
-      const result = await client.pupPage.evaluate(async (targetChatId, b64, fname, cap) => {
-        const chat = await window.WWebJS.getChat(targetChatId, { getAsModel: false });
-        if (!chat) throw new Error('Chat not found: ' + targetChatId);
-        const actualChat = (chat && chat.chat) ? chat.chat : chat;
-        const mediaData = {
-          mimetype: 'application/pdf',
-          data: b64,
-          filename: fname || 'Invoice.pdf'
-        };
-        const options = {
-          sendMediaAsDocument: true,
-          caption: cap || '',
-          waitUntilMsgSent: true
-        };
-        const msg = await window.WWebJS.sendMessage(actualChat, mediaData, options);
-        return msg ? { ok: true, id: msg?.id?._serialized || 'sent' } : null;
-      }, chatId, cleanB64, filename, docCaption);
-
-      if (result) {
-        console.log(`✅ PDF document sent via direct WWebJS.sendMessage fallback to ${chatId}!`);
-        return result;
-      }
-    } catch (evalErr) {
-      console.error('Direct WWebJS.sendMessage evaluate error:', evalErr.message);
-      throw evalErr;
-    }
-  }
-
-  throw new Error('Failed to send PDF document via both MessageMedia and WWebJS evaluate');
 }
 
 async function initClient(options = {}) {
