@@ -9108,7 +9108,7 @@ async function autoDispatchInvoiceToWhatsApp(details, textOrBase64 = null, preco
 
     const invoicePdfUrl = actualDetails.pdfUrl || actualDetails.googleDriveUrl || actualDetails.viewUrl || null;
 
-    // 2. Dispatch to Customer(s)
+    // 2. Dispatch ONLY to Customer(s)
     for (const rec of customerTargets) {
       if (!rec.clean) continue;
       const ok = await dispatchWhatsAppBotInvoice({
@@ -9122,42 +9122,6 @@ async function autoDispatchInvoiceToWhatsApp(details, textOrBase64 = null, preco
         anySent = true;
         dispatchedList.push(`${rec.label} (+${rec.clean})`);
         console.log(`✅ Automated WhatsApp Invoice sent to ${rec.label} (+${rec.clean})`);
-      }
-    }
-
-    // 3. Resolve Owner / Merchant Targets ("Me")
-    const ownerPhones = [];
-    const primaryOwnerDigits = (globalSettings?.merchantPhone || globalSettings?.company?.phone || '7386262139').toString().replace(/\D/g, '');
-    const botLinkedDigits = (whatsappBotStatus?.clientInfo?.phone || '').toString().replace(/\D/g, '');
-    const fallbackOwnerDigits = '918367047947'.replace(/\D/g, '');
-
-    const candidateDigits = [primaryOwnerDigits, botLinkedDigits, fallbackOwnerDigits].filter(d => d && d.length >= 10);
-    const seenOwnerCleans = new Set();
-
-    for (const d of candidateDigits) {
-      const clean = formatWhatsAppPhone(d);
-      if (clean && !seenOwnerCleans.has(clean)) {
-        seenOwnerCleans.add(clean);
-        // Do not double-send if customer phone is already the owner's phone
-        if (!customerTargets.some(c => c.clean === clean)) {
-          ownerPhones.push(clean);
-        }
-      }
-    }
-
-    // 4. Dispatch to Owner ("Me") instantly
-    for (const ownerClean of ownerPhones) {
-      const ok = await dispatchWhatsAppBotInvoice({
-        phone: ownerClean,
-        text: ownerText,
-        filename,
-        pdfBase64,
-        pdfUrl: invoicePdfUrl
-      });
-      if (ok) {
-        anySent = true;
-        dispatchedList.push(`Owner / Me (+${ownerClean})`);
-        console.log(`✅ WhatsApp Invoice Owner Copy delivered to +${ownerClean}!`);
       }
     }
 
