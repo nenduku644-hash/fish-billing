@@ -1345,19 +1345,37 @@ function processRealtimeSyncMessage(msg, source = 'mesh') {
         partiesDb = msg.parties.filter(p => p && !_dpi.includes(p.id) && !_dpi.includes(p.name));
       else partiesDb = JSON.parse(localStorage.getItem("parties") || "[]");
 
-      const rawInvs = (Array.isArray(msg.invoices) && msg.invoices.length > 0) ? msg.invoices : JSON.parse(localStorage.getItem("invoices") || "[]");
-      // ★ Merge: protect recently-saved local invoices from stale peer data
-      const _recentMuts = window.recentInvoiceMutations || {};
-      const _nowMs = Date.now();
-      const _pendingLocal = [];
+      const rawInvs = (Array.isArray(msg.invoices) && msg.invoices.length > 0) ? msg.invoices : (invoicesDb || []);
+      const tombstones = typeof window.getDeletedInvoiceTombstones === 'function' ? window.getDeletedInvoiceTombstones() : [];
+      const deletedSet = new Set(tombstones.map(t => String(t || '').trim().toLowerCase()));
+      const peerInvMap = new Map();
+
+      rawInvs.forEach(inv => {
+        if (!inv) return;
+        const id = String(inv.id || (inv.details && inv.details.id) || '').trim();
+        const invNo = String(inv.invoiceNo || (inv.details && inv.details.invoiceNo) || '').trim().toLowerCase();
+        if (id && deletedSet.has(id.toLowerCase())) return;
+        if (invNo && deletedSet.has(invNo)) return;
+        const key = id || invNo;
+        if (key) peerInvMap.set(key, inv);
+      });
+
       (invoicesDb || []).forEach(inv => {
-        if (!inv || !inv.id) return;
-        const _sAt = _recentMuts[inv.id] || _recentMuts[inv.invoiceNo];
-        if (_sAt && (_nowMs - _sAt) < 120000 && !rawInvs.some(ri => ri && ri.id === inv.id)) {
-          _pendingLocal.push(inv);
+        if (!inv) return;
+        const id = String(inv.id || (inv.details && inv.details.id) || '').trim();
+        const invNo = String(inv.invoiceNo || (inv.details && inv.details.invoiceNo) || '').trim().toLowerCase();
+        if (id && deletedSet.has(id.toLowerCase())) return;
+        if (invNo && deletedSet.has(invNo)) return;
+        const key = id || invNo;
+        if (key && !peerInvMap.has(key)) {
+          peerInvMap.set(key, inv);
         }
       });
-      invoicesDb = window.filterOutDeletedInvoices(rawInvs.concat(_pendingLocal));
+
+      invoicesDb = window.filterOutDeletedInvoices(Array.from(peerInvMap.values()));
+      invoicesDb.sort((a, b) => String(a.invoiceNo || "").localeCompare(String(b.invoiceNo || "")));
+      try { localStorage.setItem("invoices", JSON.stringify(invoicesDb)); } catch (e) {}
+      if (window.TurboIndexedDB) window.TurboIndexedDB.saveAllInvoices(invoicesDb);
 
       if (msg.settings && typeof msg.settings === 'object' && Object.keys(msg.settings).length > 0) globalSettings = msg.settings;
       else globalSettings = JSON.parse(localStorage.getItem("settings") || "{}");
@@ -2107,43 +2125,80 @@ window.triggerDatabaseSync = async function(forceReload = false) {
 
     let changed = false;
 
-    // 1. Authoritative Products directly from Google Database Master
+    // 1. Authoritative Products directly from Google Database Master (Union Merge)
     if (Array.isArray(data.products)) {
-      productsDb = data.products;
+      const serverProdMap = new Map();
+      data.products.forEach(p => { if (p && p.id) serverProdMap.set(p.id, p); });
+      (productsDb || []).forEach(p => {
+        if (p && p.id && !serverProdMap.has(p.id)) {
+          serverProdMap.set(p.id, p);
+          if (window.TurboOutboxQueue && navigator.onLine) {
+            window.TurboOutboxQueue.enqueue("save_products", { products: productsDb });
+          }
+        }
+      });
+      productsDb = Array.from(serverProdMap.values());
       window.productsDb = productsDb;
       try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch(e){}
       if (window.TurboIndexedDB) window.TurboIndexedDB.saveAllProducts(productsDb);
       changed = true;
     }
 
-    // 2. Authoritative Parties directly from Google Database Master
+    // 2. Authoritative Parties directly from Google Database Master (Union Merge)
     if (Array.isArray(data.parties)) {
-      partiesDb = data.parties;
+      const serverPartyMap = new Map();
+      data.parties.forEach(p => { if (p && p.id) serverPartyMap.set(p.id, p); });
+      (partiesDb || []).forEach(p => {
+        if (p && p.id && !serverPartyMap.has(p.id)) {
+          serverPartyMap.set(p.id, p);
+          if (window.TurboOutboxQueue && navigator.onLine) {
+            window.TurboOutboxQueue.enqueue("save_parties", { parties: partiesDb });
+          }
+        }
+      });
+      partiesDb = Array.from(serverPartyMap.values());
       window.partiesDb = partiesDb;
       try { localStorage.setItem("parties", JSON.stringify(partiesDb)); } catch(e){}
       if (window.TurboIndexedDB) window.TurboIndexedDB.saveAllParties(partiesDb);
       changed = true;
     }
 
-    // 3. Authoritative Invoices directly from Google Database Master
-    // ★ MERGE — protect invoices saved locally in the last 2 minutes from being overwritten by stale sync
+    // 3. Authoritative Invoices directly from Google Database Master (Union Merge with Zero Data Loss)
     if (Array.isArray(data.invoices)) {
-      const serverInvMap = new Map();
-      data.invoices.forEach(inv => { if (inv && inv.id) serverInvMap.set(inv.id, inv); });
+      const tombstones = typeof window.getDeletedInvoiceTombstones === 'function' ? window.getDeletedInvoiceTombstones() : [];
+      const deletedSet = new Set(tombstones.map(t => String(t || '').trim().toLowerCase()));
 
-      const recentMuts = window.recentInvoiceMutations || {};
-      const now = Date.now();
-      const PROTECT_WINDOW_MS = 120000;
-      const pendingLocalInvoices = [];
+      const unifiedMap = new Map();
+
+      // Step A: Add all valid server invoices
+      data.invoices.forEach(inv => {
+        if (!inv) return;
+        const id = String(inv.id || (inv.details && inv.details.id) || '').trim();
+        const invNo = String(inv.invoiceNo || (inv.details && inv.details.invoiceNo) || '').trim().toLowerCase();
+        if (id && deletedSet.has(id.toLowerCase())) return;
+        if (invNo && deletedSet.has(invNo)) return;
+        const key = id || invNo;
+        if (key) unifiedMap.set(key, inv);
+      });
+
+      // Step B: Union with all local invoices so newly generated invoices NEVER disappear!
       (invoicesDb || []).forEach(inv => {
-        if (!inv || !inv.id) return;
-        const savedAt = recentMuts[inv.id] || recentMuts[inv.invoiceNo];
-        if (savedAt && (now - savedAt) < PROTECT_WINDOW_MS && !serverInvMap.has(inv.id)) {
-          pendingLocalInvoices.push(inv);
+        if (!inv) return;
+        const id = String(inv.id || (inv.details && inv.details.id) || '').trim();
+        const invNo = String(inv.invoiceNo || (inv.details && inv.details.invoiceNo) || '').trim().toLowerCase();
+        if (id && deletedSet.has(id.toLowerCase())) return;
+        if (invNo && deletedSet.has(invNo)) return;
+        const key = id || invNo;
+        if (key && !unifiedMap.has(key)) {
+          unifiedMap.set(key, inv);
+          // Self-heal: ensure this local invoice is safely enqueued to push to cloud database
+          if (window.TurboOutboxQueue && navigator.onLine) {
+            window.TurboOutboxQueue.enqueue("save_invoice", { invoice: inv });
+          }
         }
       });
 
-      invoicesDb = window.filterOutDeletedInvoices(data.invoices.concat(pendingLocalInvoices));
+      invoicesDb = window.filterOutDeletedInvoices(Array.from(unifiedMap.values()));
       invoicesDb.sort((a, b) => String(a.invoiceNo || "").localeCompare(String(b.invoiceNo || "")));
       window.invoicesDb = invoicesDb;
       try { localStorage.setItem("invoices", JSON.stringify(invoicesDb)); } catch(e){}
