@@ -2,6 +2,12 @@ const { app, BrowserWindow, Menu, shell, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+// Hardware Acceleration & Chromium GPU Performance Switches
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('enable-features', 'CanvasOopRasterization,WebAssemblySimd');
+app.commandLine.appendSwitch('enable-fast-unload');
+
 // Ensure single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {

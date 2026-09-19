@@ -6888,12 +6888,16 @@ function calculateSummaryAndTable() {
   let totalIgst = breakdown.totalIgst;
   const isLocal = breakdown.isLocal;
 
+  const fragment = document.createDocumentFragment();
+  const origInv = (currentInvoice && currentInvoice.isEditing && currentInvoice.id) ? TurboDataStore.getInvoice(currentInvoice.id) : null;
+  const origItems = (origInv && origInv.details && Array.isArray(origInv.details.items)) ? origInv.details.items : [];
+
   currentInvoice.items.forEach(item => {
     totalQty += item.quantity;
 
     // Remaining warehouse stock after this cart commitment
     let remStockBadge = '';
-    const prod = productsDb.find(p => (item.productId && p.id === item.productId) || ((p.description || '').trim().toLowerCase() === (item.description || '').trim().toLowerCase()));
+    const prod = (item.productId && TurboDataStore.productsById.get(item.productId)) || TurboDataStore.getProduct(item.description);
     if (prod && prod.stock !== undefined && prod.stock !== null && prod.stock !== '') {
       const liveStock = parseInt(prod.stock, 10) || 0;
       const totalInCartForProd = currentInvoice.items
@@ -6901,15 +6905,12 @@ function calculateSummaryAndTable() {
         .reduce((sum, it) => sum + (parseFloat(it.quantity) || 0), 0);
       
       let previouslyInvoicedQty = 0;
-      if (currentInvoice && currentInvoice.isEditing && currentInvoice.id) {
-        const origInv = invoicesDb.find(inv => inv && inv.id === currentInvoice.id);
-        if (origInv && origInv.details && Array.isArray(origInv.details.items)) {
-          const matchingOld = origInv.details.items.find(it => 
-            (it.productId && prod.id && it.productId === prod.id) ||
-            (it.description && prod.description && it.description.trim().toLowerCase() === prod.description.trim().toLowerCase())
-          );
-          if (matchingOld) previouslyInvoicedQty = parseFloat(matchingOld.quantity) || 0;
-        }
+      if (origItems.length > 0) {
+        const matchingOld = origItems.find(it => 
+          (it.productId && prod.id && it.productId === prod.id) ||
+          (it.description && prod.description && it.description.trim().toLowerCase() === prod.description.trim().toLowerCase())
+        );
+        if (matchingOld) previouslyInvoicedQty = parseFloat(matchingOld.quantity) || 0;
       }
       const remAfterCart = (liveStock + previouslyInvoicedQty) - totalInCartForProd;
       const remColor = remAfterCart <= 0 ? '#ef4444' : (remAfterCart <= 10 ? '#d97706' : '#059669');
@@ -6942,8 +6943,10 @@ function calculateSummaryAndTable() {
         </button>
       </td>
     `;
-    elements.billingItemsTbody.appendChild(tr);
+    fragment.appendChild(tr);
   });
+
+  elements.billingItemsTbody.appendChild(fragment);
 
   if (elements.sumCgstRow) elements.sumCgstRow.style.display = 'none';
   if (elements.sumSgstRow) elements.sumSgstRow.style.display = 'none';
@@ -10803,7 +10806,10 @@ function renderHistoryTableRows(records) {
     return getTs(b) - getTs(a);
   });
 
-  sortedRecords.forEach(inv => {
+  const htmlBuffer = [];
+  for (let idx = 0; idx < sortedRecords.length; idx++) {
+    const inv = sortedRecords[idx];
+    if (!inv) continue;
     const details = inv.details || {};
     const isEstimate = Boolean(inv.isEstimate || details.isEstimate || String(inv.invoiceNo || "").startsWith("EST-"));
     const payInfo = getInvoicePaidAndBalance(inv);
@@ -10840,34 +10846,35 @@ function renderHistoryTableRows(records) {
       : ((inv.items || details.items || []).length);
     const invTotal = safeParseAmount(inv.total !== undefined ? inv.total : details.total);
 
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td style="font-weight: 700; color: var(--primary-teal);">#${inv.invoiceNo}</td>
-      <td>${formatInputDateString(invDate)}</td>
-      <td style="font-weight: 600;">${consigneeDisplay}${subBuyerText}</td>
-      <td class="text-center">${itemsCount}</td>
-      <td style="text-align: right; font-weight: 700;">₹ ${formatCurrency(invTotal)}</td>
-      <td class="text-center">
-        ${isEstimate 
-          ? `<span class="badge-status" style="background: rgba(245, 158, 11, 0.15); color: #d97706; font-weight: 700; border: 1px solid rgba(245, 158, 11, 0.3);">Quotation</span>` 
-          : `<span class="badge-status ${badgeClass}">${status}</span>`}
-      </td>
-      <td class="actions-cell">
-        <button class="action-btn share btn-whatsapp primary-wa-action" onclick="shareInvoiceToWhatsApp('${inv.id}', this)" title="Send Invoice & PDF via WhatsApp (1-Click)" style="background: #16a34a !important; color: #ffffff !important; font-weight: 700; width: 30px; height: 30px; border-radius: 6px; box-shadow: 0 1px 3px rgba(22, 163, 74, 0.35);"><i class="fa-brands fa-whatsapp" style="font-size: 15px; color: #ffffff !important;"></i></button>
-        <button class="action-btn print" onclick="printSavedInvoice('${inv.id}')" title="Print A4 Bill"><i class="fa-solid fa-print"></i></button>
-        <button class="action-btn edit" onclick="editSavedInvoice('${inv.id}')" title="Edit Bill"><i class="fa-solid fa-pen-to-square"></i></button>
-        <button class="action-btn print" onclick="downloadSavedInvoicePdf('${inv.id}', this)" title="Download PDF"><i class="fa-solid fa-file-pdf text-rose"></i></button>
-        ${balanceQrBtn}
-        ${convertEstimateBtn}
-        <button class="action-btn print" onclick="printSavedInvoiceThermal('${inv.id}')" title="Print Thermal POS"><i class="fa-solid fa-receipt"></i></button>
-        <button class="action-btn repeat" onclick="repeatInvoice('${inv.id}')" title="Repeat Bill (Clone to New Invoice)"><i class="fa-solid fa-arrows-rotate" style="color: #6366f1;"></i></button>
-        <button class="action-btn share btn-telegram" onclick="shareInvoiceToTelegram('${inv.id}', this)" title="Share PDF to Telegram"><i class="fa-brands fa-telegram" style="color: #0284c7;"></i></button>
-        <button class="action-btn share" onclick="openUniversalInvoiceShareModal('${inv.id}')" title="Universal Share"><i class="fa-solid fa-share-nodes" style="color: #0891b2;"></i></button>
-        <button class="action-btn delete" onclick="deleteSavedInvoice('${inv.id || inv.invoiceNo}')" title="Delete Bill"><i class="fa-solid fa-trash"></i></button>
-      </td>
-    `;
-    elements.historyInvoicesBody.appendChild(tr);
-  });
+    htmlBuffer.push(`
+      <tr>
+        <td style="font-weight: 700; color: var(--primary-teal);">#${inv.invoiceNo}</td>
+        <td>${formatInputDateString(invDate)}</td>
+        <td style="font-weight: 600;">${consigneeDisplay}${subBuyerText}</td>
+        <td class="text-center">${itemsCount}</td>
+        <td style="text-align: right; font-weight: 700;">₹ ${formatCurrency(invTotal)}</td>
+        <td class="text-center">
+          ${isEstimate 
+            ? `<span class="badge-status" style="background: rgba(245, 158, 11, 0.15); color: #d97706; font-weight: 700; border: 1px solid rgba(245, 158, 11, 0.3);">Quotation</span>` 
+            : `<span class="badge-status ${badgeClass}">${status}</span>`}
+        </td>
+        <td class="actions-cell">
+          <button class="action-btn share btn-whatsapp primary-wa-action" onclick="shareInvoiceToWhatsApp('${inv.id}', this)" title="Send Invoice & PDF via WhatsApp (1-Click)" style="background: #16a34a !important; color: #ffffff !important; font-weight: 700; width: 30px; height: 30px; border-radius: 6px; box-shadow: 0 1px 3px rgba(22, 163, 74, 0.35);"><i class="fa-brands fa-whatsapp" style="font-size: 15px; color: #ffffff !important;"></i></button>
+          <button class="action-btn print" onclick="printSavedInvoice('${inv.id}')" title="Print A4 Bill"><i class="fa-solid fa-print"></i></button>
+          <button class="action-btn edit" onclick="editSavedInvoice('${inv.id}')" title="Edit Bill"><i class="fa-solid fa-pen-to-square"></i></button>
+          <button class="action-btn print" onclick="downloadSavedInvoicePdf('${inv.id}', this)" title="Download PDF"><i class="fa-solid fa-file-pdf text-rose"></i></button>
+          ${balanceQrBtn}
+          ${convertEstimateBtn}
+          <button class="action-btn print" onclick="printSavedInvoiceThermal('${inv.id}')" title="Print Thermal POS"><i class="fa-solid fa-receipt"></i></button>
+          <button class="action-btn repeat" onclick="repeatInvoice('${inv.id}')" title="Repeat Bill (Clone to New Invoice)"><i class="fa-solid fa-arrows-rotate" style="color: #6366f1;"></i></button>
+          <button class="action-btn share btn-telegram" onclick="shareInvoiceToTelegram('${inv.id}', this)" title="Share PDF to Telegram"><i class="fa-brands fa-telegram" style="color: #0284c7;"></i></button>
+          <button class="action-btn share" onclick="openUniversalInvoiceShareModal('${inv.id}')" title="Universal Share"><i class="fa-solid fa-share-nodes" style="color: #0891b2;"></i></button>
+          <button class="action-btn delete" onclick="deleteSavedInvoice('${inv.id || inv.invoiceNo}')" title="Delete Bill"><i class="fa-solid fa-trash"></i></button>
+        </td>
+      </tr>
+    `);
+  }
+  elements.historyInvoicesBody.innerHTML = htmlBuffer.join("");
 }
 
 let searchHistoryDebounce = null;
@@ -11893,10 +11900,10 @@ function renderProductsTable(records) {
   let lowCount = 0;
   let outCount = 0;
 
-  records.forEach(p => {
-    const tr = document.createElement("tr");
-    tr.id = `prod-row-${p.id}`;
-    tr.setAttribute("data-product-id", p.id);
+  const htmlBuffer = [];
+  for (let idx = 0; idx < records.length; idx++) {
+    const p = records[idx];
+    if (!p) continue;
     const rate = parseFloat(p.rate || 0);
     const disc = parseFloat(p.discount || 0);
     const valAfterDisc = Math.max(0, rate - (rate * disc / 100));
@@ -11917,67 +11924,69 @@ function renderProductsTable(records) {
       stockBadge = `<span style="display: inline-block; background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; padding: 2px 7px; border-radius: 12px; font-size: 10px; font-weight: 700;"><i class="fa-solid fa-circle-check"></i> In Stock</span>`;
     }
 
-    tr.innerHTML = `
-      <td>
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <div style="width: 28px; height: 28px; border-radius: 6px; background: #f0fdfa; color: #0f766e; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0;">
-            <i class="fa-solid fa-box"></i>
+    htmlBuffer.push(`
+      <tr id="prod-row-${p.id}" data-product-id="${p.id}">
+        <td>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="width: 28px; height: 28px; border-radius: 6px; background: #f0fdfa; color: #0f766e; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0;">
+              <i class="fa-solid fa-box"></i>
+            </div>
+            <div>
+              <div style="font-weight: 700; color: #0f172a; font-size: 13px;">${p.description}</div>
+              <div style="font-size: 11px; color: #64748b;">${p.unit || 'Bucket'}</div>
+            </div>
           </div>
-          <div>
-            <div style="font-weight: 700; color: #0f172a; font-size: 13px;">${p.description}</div>
-            <div style="font-size: 11px; color: #64748b;">${p.unit || 'Bucket'}</div>
+        </td>
+        <td>
+          <span style="background: #f1f5f9; border: 1px solid #e2e8f0; padding: 2px 7px; border-radius: 5px; font-family: monospace; font-size: 11.5px; font-weight: 600; color: #475569;">${p.hsn || "—"}</span>
+        </td>
+        <td style="text-align: center;">
+          <span style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 5px; padding: 2px 8px; font-size: 12px; font-weight: 600; color: #334155;">${p.packSize || "—"}</span>
+        </td>
+        <td style="text-align: right; font-weight: 600; color: #334155; font-size: 13px;">₹ ${formatCurrency(rate)}</td>
+        <td style="text-align: center;">
+          <div class="prod-discount-badge" title="Click to edit promotional discount percentage">
+            <input type="number" step="0.1" min="0" max="100" value="${disc}" 
+              onchange="updateProductDiscountInline('${p.id}', this.value)" 
+              onkeydown="if(event.key==='Enter'){this.blur();}"
+              class="prod-discount-input">
+            <span class="prod-discount-pct">%</span>
           </div>
-        </div>
-      </td>
-      <td>
-        <span style="background: #f1f5f9; border: 1px solid #e2e8f0; padding: 2px 7px; border-radius: 5px; font-family: monospace; font-size: 11.5px; font-weight: 600; color: #475569;">${p.hsn || "—"}</span>
-      </td>
-      <td style="text-align: center;">
-        <span style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 5px; padding: 2px 8px; font-size: 12px; font-weight: 600; color: #334155;">${p.packSize || "—"}</span>
-      </td>
-      <td style="text-align: right; font-weight: 600; color: #334155; font-size: 13px;">₹ ${formatCurrency(rate)}</td>
-      <td style="text-align: center;">
-        <div class="prod-discount-badge" title="Click to edit promotional discount percentage">
-          <input type="number" step="0.1" min="0" max="100" value="${disc}" 
-            onchange="updateProductDiscountInline('${p.id}', this.value)" 
-            onkeydown="if(event.key==='Enter'){this.blur();}"
-            class="prod-discount-input">
-          <span class="prod-discount-pct">%</span>
-        </div>
-      </td>
-      <td style="text-align: right;">
-        <div style="display: flex; flex-direction: column; align-items: flex-end; cursor: pointer;" 
-             onclick="const pr = prompt('Set direct Price After Discount for \\'${p.description}\\':', '${valAfterDisc}'); if(pr!==null) updateProductPriceAfterDiscountInline('${p.id}', pr);"
-             title="Click to directly set price after discount (₹)">
-          <span style="font-weight: 800; color: #16a34a; font-size: 13.5px;">₹ ${formatCurrency(valAfterDisc)}</span>
-          ${disc > 0 ? `<span style="font-size: 10px; color: #059669; font-weight: 600;">(-${disc}%)</span>` : '<span style="font-size: 10px; color: #94a3b8;">(0% disc)</span>'}
-        </div>
-      </td>
-      <td style="text-align: center;">
-        <div class="prod-stock-stepper">
-          <button class="btn-stock-step" onclick="adjustProductStock('${p.id}', -1)" title="Decrease Stock">−</button>
-          <span class="stock-qty-text" id="prod-stock-qty-${p.id}">${stockVal}</span>
-          <button class="btn-stock-step" onclick="adjustProductStock('${p.id}', 1)" title="Increase Stock">+</button>
-          <span id="prod-stock-badge-${p.id}">${stockBadge}</span>
-        </div>
-      </td>
-      <td style="text-align: right; font-weight: 800; color: #0f172a; font-size: 14px;" id="prod-total-val-${p.id}">₹ ${formatCurrency(totalVal)}</td>
-      <td style="text-align: center;">
-        <div class="prod-actions-row">
-          <button class="prod-action-btn restock" onclick="quickRestockProduct('${p.id}')" title="1-Click Quick Restock (Add Inward Stock)" style="color: #0284c7; background: #e0f2fe; border: 1px solid #bae6fd;">
-            <i class="fa-solid fa-boxes-packing"></i>
-          </button>
-          <button class="prod-action-btn edit" onclick="openProductModal('${p.id}')" title="Edit Product & Stock">
-            <i class="fa-solid fa-pen-to-square"></i>
-          </button>
-          <button class="prod-action-btn delete" onclick="deleteProductRowDb('${p.id}')" title="Delete Product">
-            <i class="fa-solid fa-trash-can"></i>
-          </button>
-        </div>
-      </td>
-    `;
-    elements.productsListBody.appendChild(tr);
-  });
+        </td>
+        <td style="text-align: right;">
+          <div style="display: flex; flex-direction: column; align-items: flex-end; cursor: pointer;" 
+               onclick="const pr = prompt('Set direct Price After Discount for \\'${p.description}\\':', '${valAfterDisc}'); if(pr!==null) updateProductPriceAfterDiscountInline('${p.id}', pr);"
+               title="Click to directly set price after discount (₹)">
+            <span style="font-weight: 800; color: #16a34a; font-size: 13.5px;">₹ ${formatCurrency(valAfterDisc)}</span>
+            ${disc > 0 ? `<span style="font-size: 10px; color: #059669; font-weight: 600;">(-${disc}%)</span>` : '<span style="font-size: 10px; color: #94a3b8;">(0% disc)</span>'}
+          </div>
+        </td>
+        <td style="text-align: center;">
+          <div class="prod-stock-stepper">
+            <button class="btn-stock-step" onclick="adjustProductStock('${p.id}', -1)" title="Decrease Stock">−</button>
+            <span class="stock-qty-text" id="prod-stock-qty-${p.id}">${stockVal}</span>
+            <button class="btn-stock-step" onclick="adjustProductStock('${p.id}', 1)" title="Increase Stock">+</button>
+            <span id="prod-stock-badge-${p.id}">${stockBadge}</span>
+          </div>
+        </td>
+        <td style="text-align: right; font-weight: 800; color: #0f172a; font-size: 14px;" id="prod-total-val-${p.id}">₹ ${formatCurrency(totalVal)}</td>
+        <td style="text-align: center;">
+          <div class="prod-actions-row">
+            <button class="prod-action-btn restock" onclick="quickRestockProduct('${p.id}')" title="1-Click Quick Restock (Add Inward Stock)" style="color: #0284c7; background: #e0f2fe; border: 1px solid #bae6fd;">
+              <i class="fa-solid fa-boxes-packing"></i>
+            </button>
+            <button class="prod-action-btn edit" onclick="openProductModal('${p.id}')" title="Edit Product & Stock">
+              <i class="fa-solid fa-pen-to-square"></i>
+            </button>
+            <button class="prod-action-btn delete" onclick="deleteProductRowDb('${p.id}')" title="Delete Product">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `);
+  }
+  elements.productsListBody.innerHTML = htmlBuffer.join("");
 
   // Update Top KPI Summary Metrics Cards
   const kpiCount = document.getElementById("prod-kpi-count");
@@ -12185,43 +12194,50 @@ function renderPartiesLists(records) {
   elements.receiversScrollBox.innerHTML = "";
   elements.consigneesScrollBox.innerHTML = "";
 
-  const receivers = records.filter(p => p.type === 'receiver');
-  const consignees = records.filter(p => p.type === 'consignee');
+  const list = Array.isArray(records) ? records : partiesDb;
+  const receiversFrag = document.createDocumentFragment();
+  const consigneesFrag = document.createDocumentFragment();
+  let rCount = 0;
+  let cCount = 0;
 
-  if (receivers.length === 0) {
-    elements.receiversScrollBox.innerHTML = `<div class="text-center text-muted padding-20">No receivers found.</div>`;
-  } else {
-    receivers.forEach(p => {
-      const card = createPartyListCard(p);
-      elements.receiversScrollBox.appendChild(card);
-    });
+  for (let i = 0; i < list.length; i++) {
+    const p = list[i];
+    if (!p) continue;
+    const card = createPartyListCard(p);
+    if (p.type === 'consignee') {
+      consigneesFrag.appendChild(card);
+      cCount++;
+    } else {
+      receiversFrag.appendChild(card);
+      rCount++;
+    }
   }
 
-  if (consignees.length === 0) {
+  if (rCount === 0) {
+    elements.receiversScrollBox.innerHTML = `<div class="text-center text-muted padding-20">No receivers found.</div>`;
+  } else {
+    elements.receiversScrollBox.appendChild(receiversFrag);
+  }
+
+  if (cCount === 0) {
     elements.consigneesScrollBox.innerHTML = `<div class="text-center text-muted padding-20">No consignees found.</div>`;
   } else {
-    consignees.forEach(p => {
-      const card = createPartyListCard(p);
-      elements.consigneesScrollBox.appendChild(card);
-    });
+    elements.consigneesScrollBox.appendChild(consigneesFrag);
   }
 }
 
 window.sendPartyPaymentReminderWhatsApp = async function(partyName, phone) {
-  const customerInvoices = invoicesDb.filter(inv => inv.customerName === partyName || (inv.details?.buyer?.name) === partyName);
-  let totalBilled = 0, totalPaid = 0;
-  customerInvoices.forEach(inv => {
-    const payInfo = getInvoicePaidAndBalance(inv);
-    totalBilled += payInfo.total;
-    totalPaid += payInfo.paid;
-  });
-  const pendingDues = Math.max(0, totalBilled - totalPaid);
+  const pBal = TurboDataStore.getPartyBalance(partyName);
+  const totalBilled = pBal.billed;
+  const totalPaid = pBal.paid;
+  const pendingDues = pBal.balance;
+  const invCount = pBal.count;
 
   let text = `🙏 *GENTLE PAYMENT REMINDER*\n`;
   text += `🏛️ *AARYAN AQUA NEEDS*\n`;
   text += `-----------------------------------\n`;
   text += `👤 *Customer:* ${partyName}\n`;
-  text += `📄 *Total Invoices:* ${customerInvoices.length}\n`;
+  text += `📄 *Total Invoices:* ${invCount}\n`;
   text += `💰 *Total Billed:* ₹ ${formatCurrency(totalBilled)}\n`;
   text += `✅ *Total Paid:* ₹ ${formatCurrency(totalPaid)}\n`;
   text += `🔴 *Outstanding Dues:* ₹ ${formatCurrency(pendingDues)}\n`;
@@ -12287,14 +12303,11 @@ window.sendPartyPaymentReminderWhatsApp = async function(partyName, phone) {
 };
 
 function createPartyListCard(p) {
-  const customerInvoices = invoicesDb.filter(inv => inv.customerName === p.name || (inv.details?.buyer?.name) === p.name);
-  let totalBilled = 0, totalPaid = 0;
-  customerInvoices.forEach(inv => {
-    const payInfo = getInvoicePaidAndBalance(inv);
-    totalBilled += payInfo.total;
-    totalPaid += payInfo.paid;
-  });
-  const pendingDues = Math.max(0, totalBilled - totalPaid);
+  const pBal = TurboDataStore.getPartyBalance(p.name);
+  const totalBilled = pBal.billed;
+  const totalPaid = pBal.paid;
+  const pendingDues = pBal.balance;
+  const billCount = pBal.count;
 
   let duesBadge = `<span style="background: rgba(16, 185, 129, 0.12); color: #10b981; padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: 700;">Paid</span>`;
   if (pendingDues > 0) {
@@ -12313,13 +12326,12 @@ function createPartyListCard(p) {
       <p style="font-size:10.5px; color:#475569; white-space: pre-line; margin-bottom: 4px;">${p.address || ''}</p>
       <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #64748b;">
         <span>${p.phone ? 'Ph: ' + p.phone : ''}</span>
-        <span style="font-weight: 600;">Billed: ₹ ${formatCurrency(totalBilled)} (${customerInvoices.length} bills)</span>
+        <span style="font-weight: 600;">Billed: ₹ ${formatCurrency(totalBilled)} (${billCount} bills)</span>
       </div>
     </div>
     <div class="actions-cell" style="display: flex; gap: 4px; align-items: center;">
       ${pendingDues > 0 ? `<button class="action-btn share btn-whatsapp" onclick="sendPartyPaymentReminderWhatsApp('${p.name.replace(/'/g, "\\'")}', '${p.phone || ''}')" title="Send WhatsApp Payment Reminder"><i class="fa-brands fa-whatsapp"></i></button>` : ''}
       <button class="action-btn edit" onclick="openPartyModal('${p.type}', '${String(p.id || p.name || '').replace(/'/g, "\\'")}')" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>
-      <button class="action-btn delete" onclick="deletePartyRowDb('${String(p.id || p.name || '').replace(/'/g, "\\'")}')" title="Delete"><i class="fa-solid fa-trash"></i></button>
     </div>
   `;
   return card;
