@@ -8791,61 +8791,25 @@ window.saveWhatsAppSettings = function() {
 
 // --- FORMAT WHATSAPP INVOICE SUMMARY ---
 function formatInvoiceWhatsAppSummary(details) {
-  const payInfo = getInvoicePaidAndBalance({ details, total: details.total, paymentStatus: details.paymentStatus });
-  const total = payInfo.total;
-  const status = payInfo.status;
-  const paid = payInfo.paid;
-  const balance = payInfo.balance;
-  const realUpiId = (globalSettings.upiId || globalSettings.bank?.upi || "7386262139@upi").trim();
+  if (typeof generateWhatsAppInvoiceMessage === 'function') {
+    return generateWhatsAppInvoiceMessage(details, false);
+  }
+  const actualDetails = (details && details.details && typeof details.details === 'object') ? details.details : (details || {});
+  const companyName = globalSettings.company?.name || 'AARYAN AQUA NEEDS';
+  const companyMobile = globalSettings.company?.phones || globalSettings.company?.phone || '7386262139';
+  const invNo = actualDetails.invoiceNo || 'INV';
+  const custName = (actualDetails.consignee?.name || actualDetails.buyer?.name || actualDetails.customerName || 'Customer').trim();
+  const total = actualDetails.total || 0;
 
-  let text = `🏛️ *${globalSettings.company?.name || 'AARYAN AQUA NEEDS'}*\n`;
-  text += `-----------------------------------\n`;
-  text += `📄 *Tax Invoice #:* #${details.invoiceNo} (${details.invoiceType || 'Tax Invoice'})\n`;
-
-  const consigneeName = (details.consignee?.name || '').trim();
-  const consigneePhone = (details.consignee?.phone || '').trim();
-  const buyerName = (details.buyer?.name || details.customerName || 'Customer').trim();
-  const buyerPhone = (details.buyer?.phone || '').trim();
-
-  if (consigneeName) {
-    text += `📦 *Shipped To (Consignee):* ${consigneeName}\n`;
-  }
-  if (consigneePhone) {
-    text += `📱 *Consignee Phone:* ${consigneePhone}\n`;
-  }
-  if (buyerName && buyerName !== consigneeName) {
-    text += `👤 *Billed To (Receiver):* ${buyerName}\n`;
-  } else if (!consigneeName) {
-    text += `👤 *Customer:* ${buyerName}\n`;
-  }
-  if (buyerPhone && buyerPhone !== consigneePhone) {
-    text += `📞 *Receiver Phone:* ${buyerPhone}\n`;
-  }
-  text += `📅 *Date:* ${details.invoiceDate || ''}\n`;
-  text += `💰 *Grand Total:* ₹ ${formatCurrency(total)}\n`;
-
-  if (balance <= 0 || status === 'Paid') {
-    text += `✅ *Payment Status:* FULLY PAID (₹ ${formatCurrency(total)})\n`;
-    text += `💳 *Payment Mode:* ${details.paymentMode || 'UPI / Cash'}\n`;
-    text += `-----------------------------------\n`;
-    text += `Thank you for your business! 🙏\n`;
-  } else {
-    text += `✅ *Amount Paid:* ₹ ${formatCurrency(paid)}\n`;
-    text += `🔴 *PENDING BALANCE DUE:* ₹ ${formatCurrency(balance)}\n`;
-    text += `-----------------------------------\n`;
-    text += `📲 *Pay Pending Balance via UPI:*\n`;
-    text += `UPI ID: *${realUpiId}*\n\n`;
-    text += `Kindly clear the pending balance at your earliest convenience. Thank you! 🙏\n`;
-  }
-
-  const onlinePdfUrl = details.pdfUrl || details.googleDriveUrl || details.viewUrl || details.details?.pdfUrl ||
-    (Array.isArray(invoicesDb) && invoicesDb.find(i => i && (i.id === details.id || String(i.invoiceNo) === String(details.invoiceNo)))?.pdfUrl) ||
-    (Array.isArray(invoicesDb) && invoicesDb.find(i => i && (i.id === details.id || String(i.invoiceNo) === String(details.invoiceNo)))?.details?.pdfUrl);
-  if (onlinePdfUrl && typeof onlinePdfUrl === 'string' && onlinePdfUrl.startsWith('http') && !onlinePdfUrl.includes('localhost')) {
-    text += `-----------------------------------\n`;
-    text += `📥 *OFFICIAL TAX INVOICE PDF:*\n${onlinePdfUrl}\n`;
-  }
-  return text;
+  return `🙏 *Namaste! Greetings from ${companyName}!* 🌊\n` +
+    `-----------------------------------\n` +
+    `Dear *${custName}*,\n\n` +
+    `Thank you for choosing *${companyName}*! We truly value your business.\n\n` +
+    `📄 *TAX INVOICE:* #${invNo}\n` +
+    `💰 *Grand Total:* ₹ ${formatCurrency(total)}\n` +
+    `📞 *Mobile:* +91 ${companyMobile}\n` +
+    `-----------------------------------\n` +
+    `Thank you for your valuable business! Have a wonderful day ahead! 🙏✨`;
 }
 
 // --- GENERATE INVOICE PDF BLOB & UPLOAD IN BACKGROUND ---
@@ -8938,7 +8902,7 @@ function waitForMqttBotAck(cmdId, timeoutMs = 2800) {
 }
 
 // Helper Functions for Dual-Mode Dispatch (Local HTTP + EMQX Cloud Mesh Relay with Delivery Confirmation)
-async function dispatchWhatsAppBotInvoice({ phone, text, filename, pdfBase64 }) {
+async function dispatchWhatsAppBotInvoice({ phone, text, filename, pdfBase64, pdfUrl = null }) {
   if (!phone) return false;
   const cleanPhone = formatWhatsAppPhone(phone);
   if (!cleanPhone) return false;
@@ -8956,7 +8920,7 @@ async function dispatchWhatsAppBotInvoice({ phone, text, filename, pdfBase64 }) 
       const res = await fetch(getWhatsAppApiEndpoint('/api/whatsapp/send-invoice'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: cleanPhone, text: cleanCaption, filename, pdfBase64 }),
+        body: JSON.stringify({ phone: cleanPhone, text: cleanCaption, filename, pdfBase64, pdfUrl }),
         signal: controller.signal
       });
       clearTimeout(tId);
@@ -8982,10 +8946,10 @@ async function dispatchWhatsAppBotInvoice({ phone, text, filename, pdfBase64 }) 
   if (realtimeMeshClient && realtimeMeshClient.connected) {
     try {
       const cmdId = 'inv_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
-      // MQTT packet size safety: send base64 over broker only if under 64KB (otherwise text with Drive PDF link is delivered)
-      const safePdfBase64 = (pdfBase64 && pdfBase64.length < 65536) ? pdfBase64 : null;
+      // MQTT packet size safety: send base64 over broker up to 5MB (handles all full A4 invoice PDFs)
+      const safePdfBase64 = (pdfBase64 && pdfBase64.length < 5000000) ? pdfBase64 : null;
       
-      const ackPromise = waitForMqttBotAck(cmdId, 25000);
+      const ackPromise = waitForMqttBotAck(cmdId, 30000);
 
       realtimeMeshClient.publish('aaryan_aqua_gst_billing_2026/whatsapp_commands', JSON.stringify({
         commandId: cmdId,
@@ -8994,6 +8958,7 @@ async function dispatchWhatsAppBotInvoice({ phone, text, filename, pdfBase64 }) 
         text: cleanCaption,
         filename,
         pdfBase64: safePdfBase64,
+        pdfUrl: pdfUrl || null,
         timestamp: Date.now()
       }));
 
@@ -9141,6 +9106,8 @@ async function autoDispatchInvoiceToWhatsApp(details, textOrBase64 = null, preco
       ? recipientsInfo.allRecipients
       : [{ clean: formatWhatsAppPhone(recipientsInfo.primaryPhone), label: 'Customer' }];
 
+    const invoicePdfUrl = actualDetails.pdfUrl || actualDetails.googleDriveUrl || actualDetails.viewUrl || null;
+
     // 2. Dispatch to Customer(s)
     for (const rec of customerTargets) {
       if (!rec.clean) continue;
@@ -9148,7 +9115,8 @@ async function autoDispatchInvoiceToWhatsApp(details, textOrBase64 = null, preco
         phone: rec.clean,
         text: customerText,
         filename,
-        pdfBase64
+        pdfBase64,
+        pdfUrl: invoicePdfUrl
       });
       if (ok) {
         anySent = true;
@@ -9183,7 +9151,8 @@ async function autoDispatchInvoiceToWhatsApp(details, textOrBase64 = null, preco
         phone: ownerClean,
         text: ownerText,
         filename,
-        pdfBase64
+        pdfBase64,
+        pdfUrl: invoicePdfUrl
       });
       if (ok) {
         anySent = true;
@@ -9320,7 +9289,8 @@ window.shareInvoicePdfNative = async function(details, btnEl = null, force1Click
           phone: rec.clean,
           text: fullShareText,
           filename,
-          pdfBase64
+          pdfBase64,
+          pdfUrl: publicPdfUrl || details.pdfUrl || null
         });
         if (ok) {
           sentCount++;
