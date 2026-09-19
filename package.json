@@ -2,13 +2,19 @@
   "name": "aaryan-aqua-billing",
   "version": "5.3.0",
   "description": "Aaryan Aqua Needs - Professional GST Billing Application",
+  "author": "Aaryan Aqua Needs",
   "main": "electron-main.js",
   "scripts": {
     "start": "electron .",
+    "build:icons": "node build_icons.js",
+    "build:win": "electron-builder --win",
+    "build:win-portable": "electron-builder --win portable",
+    "build:win-installer": "electron-builder --win nsis",
     "build:mac": "electron-builder --mac",
+    "build:mac-universal": "electron-builder --mac --universal",
     "build:mac-arm": "electron-builder --mac --arm64",
     "build:mac-intel": "electron-builder --mac --x64",
-    "build:win": "electron-builder --win"
+    "build:all": "electron-builder -mw"
   },
   "dependencies": {
     "cors": "^2.8.6",
@@ -18,12 +24,17 @@
     "whatsapp-web.js": "^1.34.7"
   },
   "devDependencies": {
-    "electron": "^30.0.0",
+    "electron": "^30.5.1",
     "electron-builder": "^24.13.3"
   },
   "build": {
     "appId": "com.aaryanaqua.billing",
     "productName": "Aaryan Aqua Needs",
+    "copyright": "Copyright © 2026 Aaryan Aqua Needs",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
     "files": [
       "index.html",
       "index_v5.js",
@@ -35,17 +46,65 @@
       "signature.png",
       "manifest.json",
       "electron-main.js",
+      "preload.js",
       "mqtt.min.js",
-      "jsqr.min.js"
+      "jsqr.min.js",
+      "build/**/*"
     ],
     "win": {
-      "target": ["nsis", "portable"],
-      "icon": "lord_ganesha.jpg"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Aaryan Aqua Needs"
+    },
+    "portable": {
+      "artifactName": "${productName} Portable ${version}.${ext}"
     },
     "mac": {
       "category": "public.app-category.finance",
-      "target": ["dmg", "zip"],
-      "icon": "lord_ganesha.jpg"
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "build/icon.png",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "title": "${productName} Installer",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     }
   }
 }

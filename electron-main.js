@@ -1,33 +1,94 @@
-const { app, BrowserWindow, Menu, shell } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain } = require('electron');
 const path = require('path');
+const fs = require('fs');
+
+// Ensure single instance lock
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+}
 
 let mainWindow = null;
 
+// Window state preservation helper
+function getWindowStatePath() {
+  return path.join(app.getPath('userData'), 'window-state.json');
+}
+
+function loadWindowState() {
+  try {
+    const p = getWindowStatePath();
+    if (fs.existsSync(p)) {
+      return JSON.parse(fs.readFileSync(p, 'utf8'));
+    }
+  } catch (e) {}
+  return { width: 1366, height: 860, isMaximized: false };
+}
+
+function saveWindowState() {
+  if (!mainWindow) return;
+  try {
+    const isMaximized = mainWindow.isMaximized();
+    const bounds = mainWindow.getBounds();
+    const state = {
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      isMaximized
+    };
+    fs.writeFileSync(getWindowStatePath(), JSON.stringify(state));
+  } catch (e) {}
+}
+
 function createWindow() {
+  const savedState = loadWindowState();
+
   mainWindow = new BrowserWindow({
-    width: 1366,
-    height: 860,
+    x: savedState.x,
+    y: savedState.y,
+    width: savedState.width || 1366,
+    height: savedState.height || 860,
     minWidth: 1024,
     minHeight: 700,
     title: "Aaryan Aqua Needs - GST Billing System",
-    icon: path.join(__dirname, 'lord_ganesha.jpg'),
+    icon: path.join(__dirname, 'build', 'icon.png'),
+    backgroundColor: '#0f172a',
+    show: false, // Show gracefully after ready-to-show
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      enableRemoteModule: false
+      enableRemoteModule: false,
+      preload: path.join(__dirname, 'preload.js')
     }
   });
 
-  // Load the local application
+  if (savedState.isMaximized) {
+    mainWindow.maximize();
+  }
+
+  // Load the application
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
-  // Open external links in default browser (WhatsApp, Telegram, etc.)
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+  });
+
+  // Open external links safely in user's default browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https://wa.me') || url.startsWith('https://t.me') || url.startsWith('http')) {
+    if (url.startsWith('https://wa.me') || 
+        url.startsWith('https://t.me') || 
+        url.startsWith('https://web.whatsapp.com') ||
+        url.startsWith('http://') || 
+        url.startsWith('https://')) {
       shell.openExternal(url);
       return { action: 'deny' };
     }
     return { action: 'allow' };
+  });
+
+  mainWindow.on('close', () => {
+    saveWindowState();
   });
 
   mainWindow.on('closed', () => {
@@ -35,54 +96,62 @@ function createWindow() {
   });
 }
 
-// macOS Application Menu
+// macOS & Windows Application Menu
 function createMenu() {
   const isMac = process.platform === 'darwin';
 
   const template = [
     ...(isMac ? [{
-      label: app.name,
+      label: 'Aaryan Aqua Needs',
       submenu: [
-        { role: 'about' },
+        { role: 'about', label: 'About Aaryan Aqua Needs' },
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
-        { role: 'hide' },
+        { role: 'hide', label: 'Hide Aaryan Aqua Needs' },
         { role: 'hideOthers' },
         { role: 'unhide' },
         { type: 'separator' },
-        { role: 'quit' }
+        { role: 'quit', label: 'Quit Aaryan Aqua Needs' }
       ]
     }] : []),
     {
-      label: 'File',
+      label: 'Billing',
       submenu: [
         {
           label: 'New Invoice',
           accelerator: 'CmdOrCtrl+N',
           click: () => {
-            if (mainWindow) {
-              mainWindow.webContents.executeJavaScript(`if (typeof switchTab === 'function') switchTab('billing');`);
-            }
+            if (mainWindow) mainWindow.webContents.executeJavaScript(`if (typeof switchTab === 'function') switchTab('billing');`);
           }
         },
         {
           label: 'Invoice History',
           accelerator: 'CmdOrCtrl+H',
           click: () => {
-            if (mainWindow) {
-              mainWindow.webContents.executeJavaScript(`if (typeof switchTab === 'function') switchTab('history');`);
-            }
+            if (mainWindow) mainWindow.webContents.executeJavaScript(`if (typeof switchTab === 'function') switchTab('history');`);
+          }
+        },
+        {
+          label: 'Dashboard Overview',
+          accelerator: 'CmdOrCtrl+D',
+          click: () => {
+            if (mainWindow) mainWindow.webContents.executeJavaScript(`if (typeof switchTab === 'function') switchTab('dashboard');`);
           }
         },
         { type: 'separator' },
         {
+          label: 'Save Active Invoice',
+          accelerator: 'CmdOrCtrl+S',
+          click: () => {
+            if (mainWindow) mainWindow.webContents.executeJavaScript(`if (typeof handleSaveInvoice === 'function') handleSaveInvoice('save_only');`);
+          }
+        },
+        {
           label: 'Print Active Invoice',
           accelerator: 'CmdOrCtrl+P',
           click: () => {
-            if (mainWindow) {
-              mainWindow.webContents.print();
-            }
+            if (mainWindow) mainWindow.webContents.print();
           }
         },
         { type: 'separator' },
@@ -106,6 +175,13 @@ function createMenu() {
       submenu: [
         { role: 'reload' },
         { role: 'forceReload' },
+        {
+          label: 'Sync Database Now',
+          accelerator: 'CmdOrCtrl+R',
+          click: () => {
+            if (mainWindow) mainWindow.webContents.executeJavaScript(`if (typeof triggerDatabaseSync === 'function') triggerDatabaseSync(true);`);
+          }
+        },
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },
@@ -133,9 +209,23 @@ function createMenu() {
       role: 'help',
       submenu: [
         {
-          label: 'Open Cloud Portal',
+          label: 'Aaryan Aqua Online Cloud Portal',
           click: async () => {
             await shell.openExternal('https://kandukurijagan7-star.github.io/bill/');
+          }
+        },
+        {
+          label: 'WhatsApp Companion Console',
+          click: async () => {
+            await shell.openExternal('http://localhost:3001');
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Developer Tools',
+          accelerator: 'F12',
+          click: () => {
+            if (mainWindow) mainWindow.webContents.toggleDevTools();
           }
         }
       ]
@@ -145,6 +235,13 @@ function createMenu() {
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
 }
+
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
 
 app.whenReady().then(() => {
   createMenu();

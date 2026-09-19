@@ -1,6 +1,8 @@
 node_modules/
 data/
 .env
+dist/
+build/icon.ico
 
 # Local Netlify folder
 .netlify
