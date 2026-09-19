@@ -6897,6 +6897,7 @@ window.addBillingItemRow = function() {
       ? window.parseMultiLotWeight(rawQty) 
       : { total: parseFloat(rawQty) || 1, count: 1, isMulti: false };
     const qty = parsedLot.total > 0 ? parsedLot.total : 1;
+    const hsn = (elements.billItemHsn ? elements.billItemHsn.value.trim() : "") || (prod ? (prod.hsn || "") : "");
     const unit = (elements.billItemUnit ? elements.billItemUnit.value.trim() : "") || (prod ? (prod.unit || "Bucket") : "Bucket");
     const gstRate = parseFloat(elements.billItemGstRate ? elements.billItemGstRate.value : "0") || (prod ? (parseFloat(prod.gstRate) || 0) : 0);
     const discount = parseFloat(elements.billItemDiscount ? elements.billItemDiscount.value : "0") || 0;
