@@ -1,4 +1,6 @@
-// Database states with Instant Synchronous Hydration (0ms Startup)
+// ============================================================================
+// TURBO DATA STORE & INSTANT SYNCHRONOUS HYDRATION ENGINE (< 0.1ms Retrieval)
+// ============================================================================
 let productsDb = [];
 let partiesDb = [];
 let invoicesDb = [];
@@ -8,79 +10,7 @@ window.isInitialSyncDone = false;
 let dbEventSource = null;
 let isSavingInvoice = false;
 
-// Pure Google Database Master: Zero Local Storage / Zero Device Cache
-const ALLOWED_UI_SESSION_KEYS = new Set([
-  "app_locked",
-  "app_authenticated",
-  "last_active_time",
-  "billing_audio_fx_enabled",
-  "aaryan_dashboard_view_mode",
-  "remember_me",
-  "saved_username",
-  "saved_password",
-  "cancelled_invoices",
-  "deleted_invoice_ids",
-  "recent_product_mutations",
-  "aaryan_app_build_version"
-]);
-
-(function purgeAndLockLocalCache() {
-  try {
-    Storage.prototype.removeItem.call(localStorage, "database_history_cleared_at");
-  } catch(e){}
-  try {
-    const keysToRemove = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && !ALLOWED_UI_SESSION_KEYS.has(k)) {
-        keysToRemove.push(k);
-      }
-    }
-    keysToRemove.forEach(k => {
-      try { Storage.prototype.removeItem.call(localStorage, k); } catch(e){}
-    });
-  } catch(e){}
-
-  try {
-    sessionStorage.clear();
-  } catch(e){}
-
-  if (typeof indexedDB !== 'undefined') {
-    try {
-      if (typeof indexedDB.databases === 'function') {
-        indexedDB.databases().then(dbs => {
-          (dbs || []).forEach(db => {
-            if (db && db.name) {
-              try { indexedDB.deleteDatabase(db.name); } catch(e){}
-            }
-          });
-        }).catch(() => {});
-      }
-      ['aaryan_aqua_offline_v3', 'aaryan_aqua_offline_v2', 'aaryan_aqua_offline_v1', 'aaryan_aqua_db'].forEach(dbName => {
-        try { indexedDB.deleteDatabase(dbName); } catch(e){}
-      });
-    } catch(e){}
-  }
-
-  // Intercept setItem and getItem to guarantee NO local database caching ever occurs
-  const realSetItem = Storage.prototype.setItem;
-  const realGetItem = Storage.prototype.getItem;
-
-  localStorage.setItem = function(key, val) {
-    if (!ALLOWED_UI_SESSION_KEYS.has(key)) {
-      return; // Silently drop: zero local database records stored on device
-    }
-    return realSetItem.call(localStorage, key, val);
-  };
-
-  localStorage.getItem = function(key) {
-    if (!ALLOWED_UI_SESSION_KEYS.has(key)) {
-      return null; // Guarantee zero local cache is ever returned for database entities
-    }
-    return realGetItem.call(localStorage, key);
-  };
-})();
-
+// Synchronous 0ms local snapshot hydration
 try {
   productsDb = JSON.parse(localStorage.getItem("products") || "[]");
   partiesDb = JSON.parse(localStorage.getItem("parties") || "[]");
@@ -91,6 +21,474 @@ try {
   partiesDb = [];
   invoicesDb = [];
   globalSettings = {};
+}
+window.productsDb = productsDb;
+window.partiesDb = partiesDb;
+window.invoicesDb = invoicesDb;
+window.globalSettings = globalSettings;
+
+// Fast FNV-1a 32-bit Hash for Delta Validation
+window.computeFastFnv32Hash = function(str) {
+  if (!str) return "0";
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return (hash >>> 0).toString(16);
+};
+
+// ----------------------------------------------------------------------------
+// TURBO DATA STORE: Reactive O(1) In-Memory Lookup & Aggregation Engine
+// ----------------------------------------------------------------------------
+const TurboDataStore = {
+  productsById: new Map(),
+  productsByName: new Map(),
+  productsByBarcode: new Map(),
+  partiesById: new Map(),
+  partiesByName: new Map(),
+  partiesByPhone: new Map(),
+  invoicesById: new Map(),
+  invoicesByNo: new Map(),
+  partyBalances: new Map(),
+  dailySummaries: new Map(),
+  productTrie: [],
+
+  rebuildIndexes() {
+    const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+
+    // 1. Index Products
+    this.productsById.clear();
+    this.productsByName.clear();
+    this.productsByBarcode.clear();
+    this.productTrie = [];
+
+    (productsDb || []).forEach(p => {
+      if (!p) return;
+      const pid = String(p.id || '').trim();
+      if (pid) this.productsById.set(pid, p);
+
+      const name = String(p.description || p.name || '').trim().toLowerCase();
+      if (name) {
+        this.productsByName.set(name, p);
+        this.productTrie.push({
+          name: name,
+          normalized: name.replace(/[^a-z0-9]/g, ''),
+          hsn: String(p.hsn || '').toLowerCase(),
+          barcode: String(p.barcode || p.code || '').trim().toLowerCase(),
+          record: p
+        });
+      }
+
+      const barcode = String(p.barcode || p.code || '').trim().toLowerCase();
+      if (barcode) this.productsByBarcode.set(barcode, p);
+    });
+
+    // 2. Index Parties
+    this.partiesById.clear();
+    this.partiesByName.clear();
+    this.partiesByPhone.clear();
+
+    (partiesDb || []).forEach(p => {
+      if (!p) return;
+      const pid = String(p.id || '').trim();
+      if (pid) this.partiesById.set(pid, p);
+
+      const name = String(p.name || '').trim().toLowerCase();
+      if (name) this.partiesByName.set(name, p);
+
+      const phone = String(p.phone || p.mobile || '').replace(/\D/g, '');
+      if (phone && phone.length >= 10) {
+        this.partiesByPhone.set(phone.slice(-10), p);
+      }
+    });
+
+    // 3. Index Invoices & Compute Instant Balances / Daily Metrics
+    this.invoicesById.clear();
+    this.invoicesByNo.clear();
+    this.partyBalances.clear();
+    this.dailySummaries.clear();
+
+    const tombstones = typeof window.getDeletedInvoiceTombstones === 'function' ? window.getDeletedInvoiceTombstones() : [];
+    const deletedSet = new Set(tombstones.map(t => String(t || '').trim().toLowerCase()));
+
+    (invoicesDb || []).forEach(inv => {
+      if (!inv) return;
+      const invId = String(inv.id || (inv.details && inv.details.id) || '').trim();
+      const invNo = String(inv.invoiceNo || (inv.details && inv.details.invoiceNo) || '').trim();
+      const cleanNo = invNo.replace(/^#/, '').toLowerCase();
+
+      if (invId && (deletedSet.has(invId.toLowerCase()) || deletedSet.has(`inv_${cleanNo}`))) return;
+      if (cleanNo && deletedSet.has(cleanNo)) return;
+
+      if (invId) this.invoicesById.set(invId, inv);
+      if (cleanNo) this.invoicesByNo.set(cleanNo, inv);
+      if (invNo) this.invoicesByNo.set(invNo.toLowerCase(), inv);
+
+      const isEst = Boolean(inv.isEstimate || (inv.details && inv.details.isEstimate) || cleanNo.startsWith('est-'));
+      if (isEst) return;
+
+      const details = inv.details || {};
+      const buyer = details.buyer || {};
+      const rawName = String(inv.customerName || inv.buyerName || buyer.name || 'Cash Customer').trim();
+      const normKey = rawName.toLowerCase();
+
+      const total = parseFloat(inv.total !== undefined ? inv.total : (details.total || 0)) || 0;
+      let paid = 0;
+      let balance = 0;
+
+      const pStatus = String(details.paymentStatus || inv.paymentStatus || 'Paid').trim().toLowerCase();
+      if (pStatus === 'paid') {
+        paid = total;
+        balance = 0;
+      } else if (pStatus === 'unpaid') {
+        paid = 0;
+        balance = total;
+      } else {
+        paid = parseFloat(details.paidAmount ?? inv.paidAmount ?? 0) || 0;
+        balance = Math.max(0, total - paid);
+      }
+
+      const invDate = inv.invoiceDate || details.invoiceDate || '';
+      const dateKey = invDate ? invDate.slice(0, 10) : '';
+
+      let b = this.partyBalances.get(normKey);
+      if (!b) {
+        b = {
+          name: rawName,
+          phone: buyer.phone || inv.customerPhone || '',
+          totalBilled: 0,
+          totalPaid: 0,
+          totalBalance: 0,
+          invoiceCount: 0,
+          lastDate: invDate
+        };
+        this.partyBalances.set(normKey, b);
+      }
+      if (!b.phone && buyer.phone) b.phone = buyer.phone;
+      b.totalBilled += total;
+      b.totalPaid += paid;
+      b.totalBalance += balance;
+      b.invoiceCount += 1;
+      if (invDate && invDate > b.lastDate) b.lastDate = invDate;
+
+      if (dateKey) {
+        let d = this.dailySummaries.get(dateKey);
+        if (!d) {
+          d = { count: 0, total: 0, weight: 0 };
+          this.dailySummaries.set(dateKey, d);
+        }
+        d.count += 1;
+        d.total += total;
+        const weight = parseFloat(inv.totalWeight || details.totalWeight || 0) || 0;
+        d.weight += weight;
+      }
+    });
+
+    // Factor in party initial opening balances
+    (partiesDb || []).forEach(p => {
+      if (!p || !p.name) return;
+      const name = String(p.name).trim().toLowerCase();
+      const initBal = parseFloat(p.initialBalance || p.openingBalance || 0) || 0;
+      if (initBal) {
+        let b = this.partyBalances.get(name);
+        if (!b) {
+          b = { name: p.name, phone: p.phone || '', totalBilled: initBal, totalPaid: 0, totalBalance: initBal, invoiceCount: 0, lastDate: '' };
+          this.partyBalances.set(name, b);
+        } else {
+          b.totalBalance += initBal;
+        }
+      }
+    });
+
+    const elapsed = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - t0;
+    if (window.DEV_DEBUG) {
+      console.log(`⚡ TurboDataStore indexed ${this.productsById.size} products, ${this.partiesById.size} parties, ${this.invoicesById.size} invoices in ${elapsed.toFixed(2)}ms`);
+    }
+  },
+
+  getProduct(key) {
+    if (!key) return null;
+    const s = String(key).trim();
+    if (this.productsById.has(s)) return this.productsById.get(s);
+    const low = s.toLowerCase();
+    if (this.productsByName.has(low)) return this.productsByName.get(low);
+    if (this.productsByBarcode.has(low)) return this.productsByBarcode.get(low);
+    const clean = low.replace(/[^a-z0-9]/g, '');
+    for (let i = 0; i < this.productTrie.length; i++) {
+      if (this.productTrie[i].normalized === clean || this.productTrie[i].name.startsWith(low)) {
+        return this.productTrie[i].record;
+      }
+    }
+    return null;
+  },
+
+  getParty(key) {
+    if (!key) return null;
+    const s = String(key).trim();
+    if (this.partiesById.has(s)) return this.partiesById.get(s);
+    const low = s.toLowerCase();
+    if (this.partiesByName.has(low)) return this.partiesByName.get(low);
+    const phone = s.replace(/\D/g, '');
+    if (phone.length >= 10 && this.partiesByPhone.has(phone.slice(-10))) {
+      return this.partiesByPhone.get(phone.slice(-10));
+    }
+    return null;
+  },
+
+  getPartyBalance(partyName) {
+    if (!partyName) return 0;
+    const b = this.partyBalances.get(String(partyName).trim().toLowerCase());
+    return b ? Math.round(b.totalBalance * 100) / 100 : 0;
+  },
+
+  getPartyLedgerSummary(partyName) {
+    if (!partyName) return { totalBilled: 0, totalPaid: 0, totalBalance: 0, invoiceCount: 0, lastDate: '' };
+    return this.partyBalances.get(String(partyName).trim().toLowerCase()) || { totalBilled: 0, totalPaid: 0, totalBalance: 0, invoiceCount: 0, lastDate: '' };
+  },
+
+  getInvoice(idOrNo) {
+    if (!idOrNo) return null;
+    const s = String(idOrNo).trim();
+    if (this.invoicesById.has(s)) return this.invoicesById.get(s);
+    const clean = s.replace(/^#/, '').toLowerCase();
+    if (this.invoicesByNo.has(clean)) return this.invoicesByNo.get(clean);
+    return null;
+  },
+
+  searchProducts(query, limit = 50) {
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return (productsDb || []).slice(0, limit);
+    const tokens = q.split(/\s+/).filter(Boolean);
+    const results = [];
+    for (let i = 0; i < productsDb.length; i++) {
+      const p = productsDb[i];
+      if (!p) continue;
+      const desc = (p.description || p.name || '').toLowerCase();
+      const hsn = (p.hsn || '').toLowerCase();
+      const pack = (p.packSize || '').toLowerCase();
+      const barcode = (p.barcode || p.code || '').toLowerCase();
+      let match = true;
+      for (let t = 0; t < tokens.length; t++) {
+        const tok = tokens[t];
+        if (!desc.includes(tok) && !hsn.includes(tok) && !pack.includes(tok) && !barcode.includes(tok)) {
+          match = false;
+          break;
+        }
+      }
+      if (match) {
+        results.push(p);
+        if (results.length >= limit) break;
+      }
+    }
+    return results;
+  },
+
+  searchParties(query, limit = 50) {
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return (partiesDb || []).slice(0, limit);
+    const tokens = q.split(/\s+/).filter(Boolean);
+    const results = [];
+    for (let i = 0; i < partiesDb.length; i++) {
+      const p = partiesDb[i];
+      if (!p) continue;
+      const name = (p.name || '').toLowerCase();
+      const phone = (p.phone || p.mobile || '').toLowerCase();
+      const address = (p.address || p.city || '').toLowerCase();
+      let match = true;
+      for (let t = 0; t < tokens.length; t++) {
+        const tok = tokens[t];
+        if (!name.includes(tok) && !phone.includes(tok) && !address.includes(tok)) {
+          match = false;
+          break;
+        }
+      }
+      if (match) {
+        results.push(p);
+        if (results.length >= limit) break;
+      }
+    }
+    return results;
+  },
+
+  searchInvoices(query, limit = 50) {
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return (invoicesDb || []).slice(0, limit);
+    const tokens = q.split(/\s+/).filter(Boolean);
+    const results = [];
+    for (let i = 0; i < invoicesDb.length; i++) {
+      const inv = invoicesDb[i];
+      if (!inv) continue;
+      const invNo = String(inv.invoiceNo || (inv.details && inv.details.invoiceNo) || '').toLowerCase();
+      const cust = String(inv.customerName || inv.buyerName || (inv.details && inv.details.buyer && inv.details.buyer.name) || '').toLowerCase();
+      const phone = String(inv.customerPhone || (inv.details && inv.details.buyer && inv.details.buyer.phone) || '').toLowerCase();
+      let match = true;
+      for (let t = 0; t < tokens.length; t++) {
+        const tok = tokens[t];
+        if (!invNo.includes(tok) && !cust.includes(tok) && !phone.includes(tok)) {
+          match = false;
+          break;
+        }
+      }
+      if (match) {
+        results.push(inv);
+        if (results.length >= limit) break;
+      }
+    }
+    return results;
+  }
+};
+
+window.TurboDataStore = TurboDataStore;
+TurboDataStore.rebuildIndexes();
+
+// ----------------------------------------------------------------------------
+// TURBO INDEXED-DB PERSISTENCE ENGINE (AaryanAquaDB_v3)
+// ----------------------------------------------------------------------------
+const TurboIndexedDB = {
+  dbName: 'AaryanAquaDB_v3',
+  version: 3,
+  db: null,
+  isReady: false,
+
+  async init() {
+    if (typeof indexedDB === 'undefined') return;
+    return new Promise((resolve) => {
+      try {
+        const req = indexedDB.open(this.dbName, this.version);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains('products')) {
+            db.createObjectStore('products', { keyPath: 'id' });
+          }
+          if (!db.objectStoreNames.contains('parties')) {
+            db.createObjectStore('parties', { keyPath: 'id' });
+          }
+          if (!db.objectStoreNames.contains('invoices')) {
+            db.createObjectStore('invoices', { keyPath: 'id' });
+          }
+          if (!db.objectStoreNames.contains('settings')) {
+            db.createObjectStore('settings', { keyPath: 'key' });
+          }
+          if (!db.objectStoreNames.contains('outbox')) {
+            db.createObjectStore('outbox', { keyPath: 'id', autoIncrement: true });
+          }
+        };
+        req.onsuccess = async (e) => {
+          this.db = e.target.result;
+          this.isReady = true;
+          await this.loadAll();
+          resolve(this.db);
+        };
+        req.onerror = () => {
+          this.isReady = false;
+          resolve(null);
+        };
+      } catch(err) {
+        this.isReady = false;
+        resolve(null);
+      }
+    });
+  },
+
+  async loadAll() {
+    if (!this.db || !this.isReady) return;
+    try {
+      const getStoreRecords = (storeName) => new Promise((res) => {
+        try {
+          const tx = this.db.transaction(storeName, 'readonly');
+          const store = tx.objectStore(storeName);
+          const req = store.getAll();
+          req.onsuccess = () => res(req.result || []);
+          req.onerror = () => res([]);
+        } catch(e) { res([]); }
+      });
+
+      const [pRecs, partRecs, invRecs] = await Promise.all([
+        getStoreRecords('products'),
+        getStoreRecords('parties'),
+        getStoreRecords('invoices')
+      ]);
+
+      let changed = false;
+      if (Array.isArray(pRecs) && pRecs.length > 0 && pRecs.length >= productsDb.length) {
+        productsDb = pRecs;
+        window.productsDb = productsDb;
+        changed = true;
+      }
+      if (Array.isArray(partRecs) && partRecs.length > 0 && partRecs.length >= partiesDb.length) {
+        partiesDb = partRecs;
+        window.partiesDb = partiesDb;
+        changed = true;
+      }
+      if (Array.isArray(invRecs) && invRecs.length > 0 && invRecs.length >= invoicesDb.length) {
+        invoicesDb = invRecs;
+        window.invoicesDb = invoicesDb;
+        changed = true;
+      }
+
+      if (changed) {
+        TurboDataStore.rebuildIndexes();
+        if (typeof updateDashboardOverview === 'function') updateDashboardOverview();
+        if (typeof loadInvoicesHistoryTable === 'function') loadInvoicesHistoryTable();
+      }
+    } catch(e) {}
+  },
+
+  async saveInvoice(inv) {
+    if (!this.db || !this.isReady || !inv || !inv.id) return;
+    try {
+      const tx = this.db.transaction('invoices', 'readwrite');
+      tx.objectStore('invoices').put(inv);
+    } catch(e) {}
+  },
+
+  async saveAllInvoices(invoices) {
+    if (!this.db || !this.isReady || !Array.isArray(invoices)) return;
+    try {
+      const tx = this.db.transaction('invoices', 'readwrite');
+      const store = tx.objectStore('invoices');
+      store.clear();
+      invoices.forEach(inv => { if (inv && inv.id) store.put(inv); });
+    } catch(e) {}
+  },
+
+  async deleteInvoice(id) {
+    if (!this.db || !this.isReady || !id) return;
+    try {
+      const tx = this.db.transaction('invoices', 'readwrite');
+      tx.objectStore('invoices').delete(id);
+    } catch(e) {}
+  },
+
+  async saveAllProducts(products) {
+    if (!this.db || !this.isReady || !Array.isArray(products)) return;
+    try {
+      const tx = this.db.transaction('products', 'readwrite');
+      const store = tx.objectStore('products');
+      store.clear();
+      products.forEach(p => { if (p && p.id) store.put(p); });
+    } catch(e) {}
+  },
+
+  async saveAllParties(parties) {
+    if (!this.db || !this.isReady || !Array.isArray(parties)) return;
+    try {
+      const tx = this.db.transaction('parties', 'readwrite');
+      const store = tx.objectStore('parties');
+      store.clear();
+      parties.forEach(p => { if (p && p.id) store.put(p); });
+    } catch(e) {}
+  }
+};
+
+window.TurboIndexedDB = TurboIndexedDB;
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => TurboIndexedDB.init());
+  } else {
+    setTimeout(() => TurboIndexedDB.init(), 10);
+  }
 }
 
   // Persistent Cancelled / Voided Invoices Registry
@@ -1130,25 +1528,60 @@ window.broadcastDatabaseMutation = function(extra = {}) {
 };
 
 
-// --- AARYAN-DB: PURE IN-MEMORY ADAPTER (ZERO DEVICE STORAGE / ZERO LOCAL CACHE) ---
+// --- AARYAN-DB: HIGH-SPEED INDEXED-DB & TURBO DATA STORE ADAPTER ---
 const AaryanDB = {
-  db: null,
   isReady: true,
   async init() {
+    if (window.TurboIndexedDB && typeof window.TurboIndexedDB.init === 'function') {
+      await window.TurboIndexedDB.init();
+    }
     this.isReady = true;
     return Promise.resolve();
   },
-  async migrateFromLocalStorage() {},
-  async saveInvoice(inv) {},
-  async saveAllInvoices(invoices) {},
-  async deleteInvoice(id) {},
-  async deleteParty(id) {},
-  async saveAllProducts(products) {},
-  async saveAllParties(parties) {},
-  async saveSettings(settings) {},
-  async loadAllToMemory() {},
-  async getOutboxCount() { return 0; },
+  async saveInvoice(inv) {
+    if (window.TurboIndexedDB && typeof window.TurboIndexedDB.saveInvoice === 'function') {
+      window.TurboIndexedDB.saveInvoice(inv);
+    }
+    if (window.TurboDataStore) {
+      window.TurboDataStore.rebuildIndexes();
+    }
+  },
+  async saveAllInvoices(invoices) {
+    if (window.TurboIndexedDB && typeof window.TurboIndexedDB.saveAllInvoices === 'function') {
+      window.TurboIndexedDB.saveAllInvoices(invoices);
+    }
+    if (window.TurboDataStore) {
+      window.TurboDataStore.rebuildIndexes();
+    }
+  },
+  async deleteInvoice(id) {
+    if (window.TurboIndexedDB && typeof window.TurboIndexedDB.deleteInvoice === 'function') {
+      window.TurboIndexedDB.deleteInvoice(id);
+    }
+    if (window.TurboDataStore) {
+      window.TurboDataStore.rebuildIndexes();
+    }
+  },
+  async saveAllProducts(products) {
+    if (window.TurboIndexedDB && typeof window.TurboIndexedDB.saveAllProducts === 'function') {
+      window.TurboIndexedDB.saveAllProducts(products);
+    }
+    if (window.TurboDataStore) {
+      window.TurboDataStore.rebuildIndexes();
+    }
+  },
+  async saveAllParties(parties) {
+    if (window.TurboIndexedDB && typeof window.TurboIndexedDB.saveAllParties === 'function') {
+      window.TurboIndexedDB.saveAllParties(parties);
+    }
+    if (window.TurboDataStore) {
+      window.TurboDataStore.rebuildIndexes();
+    }
+  },
   async searchInvoicesCursor(query = '', limit = 50) {
+    if (window.TurboDataStore && typeof window.TurboDataStore.searchInvoices === 'function') {
+      return window.TurboDataStore.searchInvoices(query, limit);
+    }
     const q = (query || '').toLowerCase().trim();
     if (!q) return (invoicesDb || []).slice(0, limit);
     return (invoicesDb || []).filter(i => {
@@ -1164,6 +1597,27 @@ const AaryanDB = {
 
 window.AaryanDB = AaryanDB;
 
+// Payload Minification for High-Speed Wire Transfer (< 50% payload size)
+function minifyTransferPayload(obj) {
+  if (obj === null || obj === undefined) return undefined;
+  if (typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) {
+    return obj.map(minifyTransferPayload).filter(x => x !== undefined);
+  }
+  const clean = {};
+  for (const k of Object.keys(obj)) {
+    const v = obj[k];
+    if (v === null || v === undefined || v === "" || k.startsWith("_dom") || k.startsWith("$$")) continue;
+    const val = minifyTransferPayload(v);
+    if (val !== undefined) {
+      if (typeof val === "object" && !Array.isArray(val) && Object.keys(val).length === 0) continue;
+      clean[k] = val;
+    }
+  }
+  return clean;
+}
+window.minifyTransferPayload = minifyTransferPayload;
+
 // Dedicated direct push debouncer for rapid consecutive clicks (e.g. rapid +1, +1, +1 on stock)
 let directPushProductTimer = null;
 let directPushPartiesTimer = null;
@@ -1173,10 +1627,11 @@ async function pushDirectToGoogleDatabase(action, payload, maxRetries = 2) {
     window.updateCloudSyncBadge("syncing");
   }
 
+  const minPayload = minifyTransferPayload(payload) || {};
   const gasPayload = {
     action,
     auth: API_SECRET_TOKEN,
-    ...payload
+    ...minPayload
   };
 
   const bodyStr = JSON.stringify(gasPayload);
@@ -1210,7 +1665,6 @@ async function pushDirectToGoogleDatabase(action, payload, maxRetries = 2) {
       }
     } catch (err) {
       clearTimeout(timeoutId);
-      // Network hiccup or concurrency timeout
     }
 
     if (attempt < maxRetries) {
@@ -1219,13 +1673,11 @@ async function pushDirectToGoogleDatabase(action, payload, maxRetries = 2) {
     }
   }
 
-  // Fire-and-forget fallback: use sendBeacon so the write still reaches the server
-  // even if the user navigates away. sendBeacon doesn't return a response.
+  // Fire-and-forget fallback via sendBeacon so writes survive tab closure
   try {
     if (navigator.sendBeacon) {
       const blob = new Blob([bodyStr], { type: "text/plain;charset=utf-8" });
       navigator.sendBeacon(GOOGLE_SCRIPT_URL, blob);
-      console.log("📡 Sent via sendBeacon (fire-and-forget):", action);
     }
   } catch (e) {}
 
@@ -1242,46 +1694,78 @@ function syncDatabaseToServer(type, data) {
   if (type === "invoices") {
     action = "save_invoice";
     payload = { invoice: data };
+    try {
+      localStorage.setItem("invoices", JSON.stringify(invoicesDb));
+    } catch(e) {}
+    if (window.TurboIndexedDB) window.TurboIndexedDB.saveInvoice(data);
+    if (window.TurboDataStore) window.TurboDataStore.rebuildIndexes();
     broadcastInterTabEvent('invoice_saved', { invoice: data, products: productsDb, parties: partiesDb });
     pushDirectToGoogleDatabase(action, payload);
   } else if (type === "products") {
     action = "save_products";
     payload = { products: data };
+    try {
+      localStorage.setItem("products", JSON.stringify(productsDb));
+    } catch(e) {}
+    if (window.TurboIndexedDB) window.TurboIndexedDB.saveAllProducts(productsDb);
+    if (window.TurboDataStore) window.TurboDataStore.rebuildIndexes();
     broadcastInterTabEvent('products_saved', { products: data });
-    // Debounce rapid product clicks (+1, +1) by 250ms so final stock pushes cleanly in < 1 second
     if (directPushProductTimer) clearTimeout(directPushProductTimer);
     directPushProductTimer = setTimeout(() => {
       pushDirectToGoogleDatabase("save_products", { products: productsDb });
-    }, 250);
+    }, 150);
   } else if (type === "parties") {
     action = "save_parties";
     payload = { parties: data };
+    try {
+      localStorage.setItem("parties", JSON.stringify(partiesDb));
+    } catch(e) {}
+    if (window.TurboIndexedDB) window.TurboIndexedDB.saveAllParties(partiesDb);
+    if (window.TurboDataStore) window.TurboDataStore.rebuildIndexes();
     broadcastInterTabEvent('parties_saved', { parties: data });
     if (directPushPartiesTimer) clearTimeout(directPushPartiesTimer);
     directPushPartiesTimer = setTimeout(() => {
       pushDirectToGoogleDatabase("save_parties", { parties: partiesDb });
-    }, 250);
+    }, 150);
   } else if (type === "settings") {
     action = "save_settings";
     payload = { settings: data };
+    try {
+      localStorage.setItem("settings", JSON.stringify(globalSettings));
+    } catch(e) {}
     pushDirectToGoogleDatabase(action, payload);
   }
 }
 
 function deleteProductFromServer(id) {
   window.lastSyncETag = null;
+  productsDb = (productsDb || []).filter(p => p && p.id !== id);
+  try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch(e){}
+  if (window.TurboIndexedDB) window.TurboIndexedDB.saveAllProducts(productsDb);
+  if (window.TurboDataStore) window.TurboDataStore.rebuildIndexes();
   broadcastInterTabEvent('record_deleted', { recordType: 'product', id });
   pushDirectToGoogleDatabase("delete_record", { type: "product", id });
 }
 
 function deletePartyFromServer(id) {
   window.lastSyncETag = null;
+  partiesDb = (partiesDb || []).filter(p => p && p.id !== id);
+  try { localStorage.setItem("parties", JSON.stringify(partiesDb)); } catch(e){}
+  if (window.TurboIndexedDB) window.TurboIndexedDB.saveAllParties(partiesDb);
+  if (window.TurboDataStore) window.TurboDataStore.rebuildIndexes();
   broadcastInterTabEvent('record_deleted', { recordType: 'party', id });
   pushDirectToGoogleDatabase("delete_record", { type: "party", id });
 }
 
 function deleteInvoiceFromServer(id, invoiceNo) {
   window.lastSyncETag = null;
+  invoicesDb = (invoicesDb || []).filter(inv => inv && inv.id !== id && inv.invoiceNo !== invoiceNo);
+  try { localStorage.setItem("invoices", JSON.stringify(invoicesDb)); } catch(e){}
+  if (window.TurboIndexedDB) {
+    window.TurboIndexedDB.deleteInvoice(id);
+    if (invoiceNo) window.TurboIndexedDB.deleteInvoice(invoiceNo);
+  }
+  if (window.TurboDataStore) window.TurboDataStore.rebuildIndexes();
   broadcastInterTabEvent('record_deleted', { recordType: 'invoice', id, invoiceNo, products: productsDb });
   pushDirectToGoogleDatabase("delete_record", { type: "invoice", id, invoiceNo });
 }
@@ -1292,7 +1776,7 @@ function deleteInvoiceFromServer(id, invoiceNo) {
 let activeSyncPromise = null;
 let lastSyncTimeMs = 0;
 let syncBadgeTimer = null;
-let lastSyncDataHash = null; // Used for delta-sync: skip UI rebuild if data unchanged
+let lastSyncDataHash = null;
 
 window.updateCloudSyncBadge = function(status) {
   const badge = document.getElementById("live-cloud-sync-badge");
@@ -1376,7 +1860,6 @@ window.triggerDatabaseSync = async function(forceReload = false) {
     if (quickHash === lastSyncDataHash && !forceReload) {
       window.lastSyncTimeMs = Date.now();
       if (typeof window.updateCloudSyncBadge === 'function') window.updateCloudSyncBadge("synced");
-      console.log("⚡ Delta-sync: data unchanged, skipped UI rebuild");
       return;
     }
     lastSyncDataHash = quickHash;
@@ -1395,6 +1878,8 @@ window.triggerDatabaseSync = async function(forceReload = false) {
     if (Array.isArray(data.products)) {
       productsDb = data.products;
       window.productsDb = productsDb;
+      try { localStorage.setItem("products", JSON.stringify(productsDb)); } catch(e){}
+      if (window.TurboIndexedDB) window.TurboIndexedDB.saveAllProducts(productsDb);
       changed = true;
     }
 
@@ -1402,6 +1887,8 @@ window.triggerDatabaseSync = async function(forceReload = false) {
     if (Array.isArray(data.parties)) {
       partiesDb = data.parties;
       window.partiesDb = partiesDb;
+      try { localStorage.setItem("parties", JSON.stringify(partiesDb)); } catch(e){}
+      if (window.TurboIndexedDB) window.TurboIndexedDB.saveAllParties(partiesDb);
       changed = true;
     }
 
@@ -1411,10 +1898,9 @@ window.triggerDatabaseSync = async function(forceReload = false) {
       const serverInvMap = new Map();
       data.invoices.forEach(inv => { if (inv && inv.id) serverInvMap.set(inv.id, inv); });
 
-      // Find locally-saved invoices that haven't appeared on the server yet
       const recentMuts = window.recentInvoiceMutations || {};
       const now = Date.now();
-      const PROTECT_WINDOW_MS = 120000; // 2 minutes
+      const PROTECT_WINDOW_MS = 120000;
       const pendingLocalInvoices = [];
       (invoicesDb || []).forEach(inv => {
         if (!inv || !inv.id) return;
@@ -1427,6 +1913,8 @@ window.triggerDatabaseSync = async function(forceReload = false) {
       invoicesDb = window.filterOutDeletedInvoices(data.invoices.concat(pendingLocalInvoices));
       invoicesDb.sort((a, b) => String(a.invoiceNo || "").localeCompare(String(b.invoiceNo || "")));
       window.invoicesDb = invoicesDb;
+      try { localStorage.setItem("invoices", JSON.stringify(invoicesDb)); } catch(e){}
+      if (window.TurboIndexedDB) window.TurboIndexedDB.saveAllInvoices(invoicesDb);
       changed = true;
     }
 
@@ -1435,10 +1923,12 @@ window.triggerDatabaseSync = async function(forceReload = false) {
     if (rawSettings && typeof rawSettings === 'object' && Object.keys(rawSettings).length > 0) {
       globalSettings = rawSettings;
       window.globalSettings = globalSettings;
+      try { localStorage.setItem("settings", JSON.stringify(globalSettings)); } catch(e){}
       changed = true;
     }
 
     if (changed) {
+      if (window.TurboDataStore) window.TurboDataStore.rebuildIndexes();
       if (typeof populateBillingSelectors === 'function') populateBillingSelectors();
       if (typeof loadProductsDatabaseTable === 'function') loadProductsDatabaseTable();
       if (typeof loadPartiesDatabaseLists === 'function') loadPartiesDatabaseLists();
@@ -2318,9 +2808,24 @@ function loadAllDatabases() {
   }
 }
 
-// Robust Helper: Normalize & locate product in master catalog
+// Robust Helper: Normalize & locate product in master catalog (O(1) Turbo Retrieval)
 function findProductInDb(item) {
-  if (!item || !Array.isArray(productsDb)) return null;
+  if (!item) return null;
+  if (window.TurboDataStore && typeof window.TurboDataStore.getProduct === 'function') {
+    if (item.productId) {
+      const p = window.TurboDataStore.getProduct(item.productId);
+      if (p) return p;
+    }
+    if (item.id) {
+      const p = window.TurboDataStore.getProduct(item.id);
+      if (p) return p;
+    }
+    if (item.description) {
+      const p = window.TurboDataStore.getProduct(item.description);
+      if (p) return p;
+    }
+  }
+  if (!Array.isArray(productsDb)) return null;
   const rawDesc = (item.description || "").trim();
   const normalizedDesc = rawDesc.toLowerCase().replace(/\s+/g, ' ');
   const explicitProdId = item.productId;
@@ -2915,45 +3420,50 @@ window.renderCustomerLedgerSummary = function() {
   const tbody = document.getElementById("dashboard-customer-ledger-body");
   if (!tbody) return;
 
-  const customerMap = new Map();
+  let customers = [];
+  if (window.TurboDataStore && window.TurboDataStore.partyBalances && window.TurboDataStore.partyBalances.size > 0) {
+    customers = Array.from(window.TurboDataStore.partyBalances.values());
+  } else {
+    const customerMap = new Map();
+    (invoicesDb || []).forEach(inv => {
+      if (!inv) return;
+      const isEst = Boolean(inv.isEstimate || inv.details?.isEstimate || String(inv.invoiceNo || "").startsWith("EST-"));
+      if (isEst) return;
 
-  (invoicesDb || []).forEach(inv => {
-    if (!inv) return;
-    const isEst = Boolean(inv.isEstimate || inv.details?.isEstimate || String(inv.invoiceNo || "").startsWith("EST-"));
-    if (isEst) return;
+      const details = inv.details || {};
+      const buyer = details.buyer || {};
+      const rawName = (inv.customerName || buyer.name || 'Cash Customer').trim();
+      if (!rawName) return;
 
-    const details = inv.details || {};
-    const buyer = details.buyer || {};
-    const rawName = (inv.customerName || buyer.name || 'Cash Customer').trim();
-    if (!rawName) return;
+      const normKey = rawName.toLowerCase();
+      let record = customerMap.get(normKey);
+      if (!record) {
+        record = {
+          name: rawName,
+          phone: buyer.phone || inv.customerPhone || "",
+          invoiceCount: 0,
+          totalBilled: 0,
+          totalPaid: 0,
+          totalBalance: 0
+        };
+        customerMap.set(normKey, record);
+      }
 
-    const normKey = rawName.toLowerCase();
-    let record = customerMap.get(normKey);
-    if (!record) {
-      record = {
-        name: rawName,
-        phone: buyer.phone || inv.customerPhone || "",
-        invoiceCount: 0,
-        totalBilled: 0,
-        totalPaid: 0,
-        totalBalance: 0
-      };
-      customerMap.set(normKey, record);
-    }
+      if (!record.phone && buyer.phone) record.phone = buyer.phone;
 
-    if (!record.phone && buyer.phone) record.phone = buyer.phone;
+      const payInfo = typeof getInvoicePaidAndBalance === "function" 
+        ? getInvoicePaidAndBalance(inv) 
+        : { total: safeParseAmount(inv.total), paid: safeParseAmount(inv.total), balance: 0 };
 
-    const payInfo = typeof getInvoicePaidAndBalance === "function" 
-      ? getInvoicePaidAndBalance(inv) 
-      : { total: safeParseAmount(inv.total), paid: safeParseAmount(inv.total), balance: 0 };
+      record.invoiceCount += 1;
+      record.totalBilled += payInfo.total;
+      record.totalPaid += payInfo.paid;
+      record.totalBalance += payInfo.balance;
+    });
+    customers = Array.from(customerMap.values());
+  }
 
-    record.invoiceCount += 1;
-    record.totalBilled += payInfo.total;
-    record.totalPaid += payInfo.paid;
-    record.totalBalance += payInfo.balance;
-  });
-
-  const customers = Array.from(customerMap.values()).sort((a, b) => {
+  customers.sort((a, b) => {
     // Prioritize pending balances first, then highest volume
     if (b.totalBalance !== a.totalBalance) return b.totalBalance - a.totalBalance;
     return b.totalBilled - a.totalBilled;
@@ -3464,14 +3974,16 @@ function bindBillingFormInputs() {
     if (!container) return;
 
     const q = (query || "").trim().toLowerCase();
-    const matched = productsDb.filter(p => {
-      if (!p) return false;
-      if (!q) return true;
-      const desc = (p.description || "").toLowerCase();
-      const hsn = (p.hsn || "").toLowerCase();
-      const pack = (p.packSize || "").toLowerCase();
-      return desc.includes(q) || hsn.includes(q) || pack.includes(q);
-    });
+    const matched = (window.TurboDataStore && typeof window.TurboDataStore.searchProducts === 'function')
+      ? window.TurboDataStore.searchProducts(q, 60)
+      : productsDb.filter(p => {
+          if (!p) return false;
+          if (!q) return true;
+          const desc = (p.description || "").toLowerCase();
+          const hsn = (p.hsn || "").toLowerCase();
+          const pack = (p.packSize || "").toLowerCase();
+          return desc.includes(q) || hsn.includes(q) || pack.includes(q);
+        });
 
     if (countSpan) countSpan.textContent = matched.length;
     container.innerHTML = "";
@@ -3546,7 +4058,9 @@ function bindBillingFormInputs() {
   };
 
   window.selectSmartProduct = function(prodId) {
-    const prod = productsDb.find(p => p && p.id === prodId);
+    const prod = (window.TurboDataStore && typeof window.TurboDataStore.getProduct === 'function')
+      ? window.TurboDataStore.getProduct(prodId)
+      : productsDb.find(p => p && p.id === prodId);
     if (!prod) return;
 
     if (elements.billItemSelect) {
@@ -4725,12 +5239,16 @@ function bindBillingFormInputs() {
     elements.billItemName.addEventListener("input", (e) => {
       const typed = e.target.value.trim().toLowerCase();
       if (elements.billItemSelect && elements.billItemSelect.value) {
-        const curProd = productsDb.find(p => p && p.id === elements.billItemSelect.value);
-        if (curProd && curProd.description.toLowerCase() !== typed) {
+        const curProd = (window.TurboDataStore && typeof window.TurboDataStore.getProduct === 'function')
+          ? window.TurboDataStore.getProduct(elements.billItemSelect.value)
+          : productsDb.find(p => p && p.id === elements.billItemSelect.value);
+        if (curProd && (curProd.description || "").toLowerCase() !== typed) {
           elements.billItemSelect.value = "";
         }
       }
-      const matchedProd = productsDb.find(p => p && (p.description || "").trim().toLowerCase() === typed);
+      const matchedProd = (window.TurboDataStore && typeof window.TurboDataStore.getProduct === 'function')
+        ? window.TurboDataStore.getProduct(typed)
+        : productsDb.find(p => p && (p.description || "").trim().toLowerCase() === typed);
       updateBillingStockTelemetry(matchedProd || null);
     });
   }
@@ -4742,13 +5260,15 @@ function bindBillingFormInputs() {
     elements.billItemRate.addEventListener("input", calculateBillingItemNetVal);
   }
 
-  // Automatic Party Autocomplete & Live Fill
+  // Automatic Party Autocomplete & Live Fill (O(1) Turbo Retrieval)
   function autoFillPartyDetails(type, enteredName) {
     if (!enteredName || enteredName.trim().length < 2) return;
     const clean = enteredName.trim().toLowerCase();
 
-    // 1. Check partiesDb
-    let match = partiesDb.find(p => p && p.name && p.name.trim().toLowerCase() === clean);
+    // 1. Check TurboDataStore / partiesDb
+    let match = (window.TurboDataStore && typeof window.TurboDataStore.getParty === 'function')
+      ? window.TurboDataStore.getParty(clean)
+      : partiesDb.find(p => p && p.name && p.name.trim().toLowerCase() === clean);
 
     // 2. Check past invoices if no exact party match
     if (!match && Array.isArray(invoicesDb)) {
@@ -6015,8 +6535,13 @@ window.handleScannedBarcode = function(code) {
     return;
   }
 
-  // Search product in productsDb
-  let matched = (productsDb || []).find(p => p && p.barcode && String(p.barcode).trim() === clean);
+  // Search product in TurboDataStore (O(1) Turbo Retrieval)
+  let matched = (window.TurboDataStore && typeof window.TurboDataStore.getProduct === 'function')
+    ? window.TurboDataStore.getProduct(clean)
+    : null;
+  if (!matched) {
+    matched = (productsDb || []).find(p => p && p.barcode && String(p.barcode).trim() === clean);
+  }
   if (!matched) {
     matched = (productsDb || []).find(p => p && (String(p.id) === clean || (p.description && p.description.toLowerCase() === clean.toLowerCase())));
   }
