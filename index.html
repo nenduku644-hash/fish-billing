@@ -69,7 +69,7 @@
       } catch (e) {}
     }
     // Build Version Enforcement: Clears stale caches when new build is deployed
-    window.__APP_BUILD_VERSION__ = "v407_customer_only_whatsapp_dispatch";
+    window.__APP_BUILD_VERSION__ = "v410_faster_user_access";
     try {
       const storedBuild = localStorage.getItem("aaryan_app_build_version");
       if (storedBuild !== window.__APP_BUILD_VERSION__) {
@@ -81,58 +81,116 @@
     } catch (e) {}
   </script>
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="index.css?v=407_customer_only_whatsapp_dispatch">
-  <script src="invoice_utils_v5.js?v=407_customer_only_whatsapp_dispatch"></script>
+  <link rel="stylesheet" href="index.css?v=410_faster_user_access">
+  <script src="invoice_utils_v5.js?v=410_faster_user_access"></script>
 </head>
 <body>
   <!-- HIGH-END LOGIN / LOCK SCREEN OVERLAY (Enforced by default for security) -->
   <div id="lock-screen-overlay" class="lock-overlay no-print">
-    <div class="login-card">
+    <div class="login-card" id="lock-screen-card">
       <div class="login-header">
-        <div class="login-logo-wrapper" style="display: flex; align-items: center; justify-content: center; margin-bottom: 10px;">
-          <img src="rallis_logo.png" alt="Rallis India Limited Logo" style="height: 65px; width: auto; object-fit: contain; border-radius: 6px; background: #ffffff; padding: 4px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+        <div class="login-logo-wrapper" style="display: flex; align-items: center; justify-content: center; margin-bottom: 8px;">
+          <img src="rallis_logo.png" alt="Rallis India Limited Logo" style="height: 58px; width: auto; object-fit: contain; border-radius: 6px; background: #ffffff; padding: 4px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
         </div>
         <h2>AARYAN AQUA NEEDS</h2>
-        <p>GST Billing & Management System</p>
+        <p>GST Billing &amp; Management System</p>
       </div>
-      
-      <div id="login-error-message" class="login-error hidden">
-        <i class="fa-solid fa-triangle-exclamation"></i> Invalid username or password!
-      </div>
-      
-      <form id="login-form" onsubmit="event.preventDefault(); submitUnlockLogin(event); return false;">
-        <div class="login-input-group">
-          <label for="login-username">Username</label>
-          <div class="input-icon-wrapper">
-            <i class="fa-solid fa-user input-icon"></i>
-            <input type="text" id="login-username" name="username" autocomplete="username" required placeholder="Enter username" value="Aaryanaqua">
-          </div>
-        </div>
-        
-        <div class="login-input-group">
-          <label for="login-password">Password</label>
-          <div class="input-icon-wrapper">
-            <i class="fa-solid fa-lock input-icon"></i>
-            <input type="password" id="login-password" name="password" autocomplete="current-password" required placeholder="Enter password">
-            <button type="button" class="btn-toggle-pwd" onclick="toggleLoginPasswordVisibility()">
-              <i id="toggle-pwd-icon" class="fa-solid fa-eye"></i>
-            </button>
-          </div>
-        </div>
-        
-        <div class="remember-me-group" style="display: flex !important; flex-direction: row !important; align-items: center !important; justify-content: flex-start !important; gap: 8px !important; margin: 12px 0 16px 0 !important; width: 100% !important; text-align: left !important;">
-          <input type="checkbox" id="login-remember-me" style="width: 16px !important; height: 16px !important; margin: 0 !important; cursor: pointer !important; accent-color: #0d9488 !important; display: inline-block !important; flex-shrink: 0 !important;">
-          <label for="login-remember-me" style="cursor: pointer !important; font-size: 13px !important; color: #cbd5e1 !important; user-select: none !important; text-transform: none !important; letter-spacing: normal !important; font-weight: normal !important; margin: 0 !important;">Remember Password</label>
-        </div>
-        
-        <button type="submit" class="btn-login-submit">
-          <span id="login-btn-text"><i class="fa-solid fa-key"></i> Unlock System</span>
-          <span id="login-btn-spinner" class="hidden"><i class="fa-solid fa-circle-notch fa-spin"></i> Unlocking...</span>
+
+      <!-- Mode Switcher Tabs: Quick PIN vs Full Password -->
+      <div class="login-mode-tabs" style="display: flex; gap: 8px; margin: 12px 0 16px 0; background: rgba(15, 23, 42, 0.6); padding: 4px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.08);">
+        <button type="button" id="tab-btn-pin" class="login-tab-btn active" onclick="switchLoginMode('pin')" style="flex: 1; padding: 8px 12px; border-radius: 8px; border: none; font-size: 12.5px; font-weight: 700; cursor: pointer; color: #ffffff; background: #0d9488; display: flex; align-items: center; justify-content: center; gap: 6px;">
+          <i class="fa-solid fa-bolt" style="color: #fef08a;"></i> Quick PIN
         </button>
-      </form>
+        <button type="button" id="tab-btn-pwd" class="login-tab-btn" onclick="switchLoginMode('password')" style="flex: 1; padding: 8px 12px; border-radius: 8px; border: none; font-size: 12.5px; font-weight: 700; cursor: pointer; color: #94a3b8; background: transparent; display: flex; align-items: center; justify-content: center; gap: 6px;">
+          <i class="fa-solid fa-key"></i> Password
+        </button>
+      </div>
+
+      <!-- Quick PIN Container -->
+      <div id="login-pin-container">
+        <div id="pin-error-message" class="login-error hidden" style="margin-bottom: 12px;">
+          <i class="fa-solid fa-triangle-exclamation"></i> <span id="pin-error-text">Invalid PIN!</span>
+        </div>
+
+        <div style="position: relative; margin-bottom: 12px;">
+          <input type="password" id="login-quick-pin" maxlength="4" placeholder="••••" autocomplete="off" inputmode="numeric" pattern="[0-9]*" style="width: 100%; text-align: center; font-size: 26px; font-weight: 800; letter-spacing: 14px; padding: 8px 12px; border-radius: 10px; border: 2px solid rgba(13, 148, 136, 0.5); background: rgba(15, 23, 42, 0.85); color: #ffffff; outline: none; transition: border-color 0.2s;" oninput="handlePinInput(event)">
+          <div style="font-size: 11px; color: #94a3b8; text-align: center; margin-top: 5px;">
+            Enter 4-digit PIN (Default: <strong style="color: #2dd4bf;">2024</strong>)
+          </div>
+        </div>
+
+        <!-- 3x4 Touch Numeric Keypad -->
+        <div class="pin-keypad-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px;">
+          <button type="button" class="pin-key" onclick="enterPinDigit('1')">1</button>
+          <button type="button" class="pin-key" onclick="enterPinDigit('2')">2</button>
+          <button type="button" class="pin-key" onclick="enterPinDigit('3')">3</button>
+          <button type="button" class="pin-key" onclick="enterPinDigit('4')">4</button>
+          <button type="button" class="pin-key" onclick="enterPinDigit('5')">5</button>
+          <button type="button" class="pin-key" onclick="enterPinDigit('6')">6</button>
+          <button type="button" class="pin-key" onclick="enterPinDigit('7')">7</button>
+          <button type="button" class="pin-key" onclick="enterPinDigit('8')">8</button>
+          <button type="button" class="pin-key" onclick="enterPinDigit('9')">9</button>
+          <button type="button" class="pin-key pin-key-action" onclick="clearPinDigit()" title="Clear PIN">C</button>
+          <button type="button" class="pin-key" onclick="enterPinDigit('0')">0</button>
+          <button type="button" class="pin-key pin-key-action" onclick="backspacePinDigit()" title="Backspace">⌫</button>
+        </div>
+
+        <!-- 1-Click Trusted Fast Unlock & Biometrics -->
+        <div id="quick-unlock-container" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;">
+          <button type="button" id="btn-fast-one-click" class="btn-fast-unlock" onclick="quickOneClickUnlock()" style="width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid #0d9488; background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%); color: #ffffff; font-size: 12.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 12px rgba(13, 148, 136, 0.3);">
+            <i class="fa-solid fa-bolt" style="color: #fef08a;"></i> 1-Click Fast Unlock (Trusted Device)
+          </button>
+          <button type="button" id="btn-biometric-unlock" class="btn-biometric hidden" onclick="quickBiometricUnlock()" style="width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(56, 189, 248, 0.3); background: rgba(15, 23, 42, 0.6); color: #38bdf8; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <i class="fa-solid fa-fingerprint"></i> Windows Hello / Biometric
+          </button>
+        </div>
+      </div>
+
+      <!-- Master Password Container -->
+      <div id="login-password-container" class="hidden">
+        <div id="login-error-message" class="login-error hidden" style="margin-bottom: 12px;">
+          <i class="fa-solid fa-triangle-exclamation"></i> Invalid username or password!
+        </div>
+        
+        <form id="login-form" onsubmit="event.preventDefault(); submitUnlockLogin(event); return false;">
+          <div class="login-input-group">
+            <label for="login-username">Username</label>
+            <div class="input-icon-wrapper">
+              <i class="fa-solid fa-user input-icon"></i>
+              <input type="text" id="login-username" name="username" autocomplete="username" required placeholder="Enter username" value="Aaryanaqua">
+            </div>
+          </div>
+          
+          <div class="login-input-group">
+            <label for="login-password">Password</label>
+            <div class="input-icon-wrapper">
+              <i class="fa-solid fa-lock input-icon"></i>
+              <input type="password" id="login-password" name="password" autocomplete="current-password" required placeholder="Enter password">
+              <button type="button" class="btn-toggle-pwd" onclick="toggleLoginPasswordVisibility()">
+                <i id="toggle-pwd-icon" class="fa-solid fa-eye"></i>
+              </button>
+            </div>
+          </div>
+          
+          <div class="remember-me-group" style="display: flex !important; flex-direction: row !important; align-items: center !important; justify-content: flex-start !important; gap: 8px !important; margin: 12px 0 16px 0 !important; width: 100% !important; text-align: left !important;">
+            <input type="checkbox" id="login-remember-me" style="width: 16px !important; height: 16px !important; margin: 0 !important; cursor: pointer !important; accent-color: #0d9488 !important; display: inline-block !important; flex-shrink: 0 !important;">
+            <label for="login-remember-me" style="cursor: pointer !important; font-size: 13px !important; color: #cbd5e1 !important; user-select: none !important; text-transform: none !important; letter-spacing: normal !important; font-weight: normal !important; margin: 0 !important;">Remember Password</label>
+          </div>
+          
+          <button type="submit" class="btn-login-submit">
+            <span id="login-btn-text"><i class="fa-solid fa-key"></i> Unlock System</span>
+            <span id="login-btn-spinner" class="hidden"><i class="fa-solid fa-circle-notch fa-spin"></i> Unlocking...</span>
+          </button>
+        </form>
+      </div>
       
-      <div class="login-footer">
-        <span>Enter your administrator credentials to unlock.</span>
+      <div class="login-footer" style="text-align: center;">
+        <span style="display: block; font-size: 11px; color: #94a3b8;">
+          <i class="fa-solid fa-shield-halved text-teal"></i> Fast &amp; Secure Commercial Billing Access
+        </span>
+        <span style="display: block; font-size: 10px; color: #64748b; margin-top: 4px;">
+          Hotkeys: <kbd style="background: rgba(255,255,255,0.1); padding: 1px 4px; border-radius: 4px;">F1</kbd> Bill &bull; <kbd style="background: rgba(255,255,255,0.1); padding: 1px 4px; border-radius: 4px;">F2</kbd> History &bull; <kbd style="background: rgba(255,255,255,0.1); padding: 1px 4px; border-radius: 4px;">F9</kbd> Lock
+        </span>
       </div>
     </div>
   </div>
@@ -1792,6 +1850,35 @@
                     </select>
                     <span class="info-lbl">Locks screen dynamically on no keyboard/mouse input</span>
                   </div>
+                  <!-- Fast Access Configuration -->
+                  <div class="col-12" style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                      <h4 style="margin: 0; font-size: 13.5px; color: #166534; display: flex; align-items: center; gap: 8px; font-weight: 700;">
+                        <i class="fa-solid fa-bolt" style="color: #16a34a;"></i> Instant Fast Access &amp; Quick PIN
+                      </h4>
+                      <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #166534; cursor: pointer; margin: 0;">
+                        <input type="checkbox" id="set-instant-launch-enabled" checked style="width: 16px; height: 16px; accent-color: #16a34a;">
+                        <span>0ms Instant Launch</span>
+                      </label>
+                    </div>
+                    <p style="margin: 0 0 10px 0; font-size: 11.5px; color: #374151; line-height: 1.4;">
+                      When enabled, trusted devices with remembered login bypass the lock screen on launch and open straight to Billing.
+                    </p>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                      <div>
+                        <label for="set-quick-pin" style="font-size: 12px; font-weight: 600; color: #1f2937;"><i class="fa-solid fa-key text-teal"></i> 4-Digit Quick PIN</label>
+                        <input type="password" id="set-quick-pin" maxlength="6" placeholder="e.g. 2024" value="2024" style="width: 100%; padding: 6px 10px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 13px;">
+                      </div>
+                      <div>
+                        <label for="set-preferred-login-mode" style="font-size: 12px; font-weight: 600; color: #1f2937;"><i class="fa-solid fa-sliders text-teal"></i> Default Lock Screen</label>
+                        <select id="set-preferred-login-mode" style="width: 100%; padding: 6px 10px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 13px;">
+                          <option value="pin" selected>Quick PIN Keypad</option>
+                          <option value="password">Master Password Form</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
                   <div class="form-group">
                     <label for="set-login-username">Login Username</label>
                     <input type="text" id="set-login-username" required placeholder="e.g. 1234">
@@ -4298,7 +4385,42 @@
     </button>
   </nav>
 
-  <script src="index_v5.js?v=409_turbo_data_transfer_and_retrieval"></script>
+  <script src="index_v5.js?v=410_faster_user_access"></script>
 </body>
 </html>
 
+<!-- New Secure Settings Modal -->
+<div id="secureSettingsModal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:20px; border:1px solid #ccc; z-index:9999; border-radius:8px; box-shadow:0 4px 6px rgba(0,0,0,0.1);">
+  <h3>Secure Application Settings</h3>
+  <label>Google Apps Script Web App URL:</label><br>
+  <input type="text" id="settingWebAppUrl" style="width:100%; margin-bottom:10px;"><br>
+  <label>API Secret Key:</label><br>
+  <input type="password" id="settingApiKey" style="width:100%; margin-bottom:10px;"><br>
+  <button onclick="saveSecureSettings()">Save</button>
+  <button onclick="document.getElementById('secureSettingsModal').style.display='none'">Cancel</button>
+</div>
+<script>
+  async function loadSecureSettings() {
+    if(window.api && window.api.getConfig) {
+      const config = await window.api.getConfig();
+      document.getElementById('settingWebAppUrl').value = config.webAppUrl || '';
+      document.getElementById('settingApiKey').value = config.apiSecretKey || '';
+    }
+  }
+  async function saveSecureSettings() {
+    if(window.api && window.api.saveConfig) {
+      const config = {
+        webAppUrl: document.getElementById('settingWebAppUrl').value,
+        apiSecretKey: document.getElementById('settingApiKey').value
+      };
+      await window.api.saveConfig(config);
+      alert('Secure Settings Saved!');
+      document.getElementById('secureSettingsModal').style.display = 'none';
+    }
+  }
+  // Expose function to open it
+  window.openSecureSettings = function() {
+    loadSecureSettings();
+    document.getElementById('secureSettingsModal').style.display = 'block';
+  }
+</script>

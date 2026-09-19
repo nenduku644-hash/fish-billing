@@ -2678,6 +2678,69 @@ body {
 .login-footer {
   font-size: 9.5px;
   color: #64748b;
+  line-height: 1.4;
+}
+
+/* Faster User Access & Quick PIN Pad */
+.login-card {
+  width: 360px;
+  max-width: 92vw;
+  padding: 30px 24px;
+}
+
+.login-tab-btn {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.login-tab-btn.active {
+  background: #0d9488 !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(13, 148, 136, 0.4);
+}
+
+.pin-key {
+  padding: 10px 0;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 23, 42, 0.65);
+  color: white;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  user-select: none;
+}
+.pin-key:hover {
+  background: rgba(13, 148, 136, 0.35);
+  border-color: #0d9488;
+}
+.pin-key:active {
+  transform: scale(0.95);
+  background: #0d9488;
+}
+.pin-key-action {
+  color: #94a3b8;
+  font-size: 13.5px;
+}
+.pin-key-action:hover {
+  color: #f43f5e;
+  border-color: #f43f5e;
+}
+.btn-fast-unlock {
+  transition: all 0.2s ease;
+}
+.btn-fast-unlock:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+.btn-biometric {
+  transition: all 0.2s ease;
+}
+.btn-biometric:hover {
+  background: rgba(56, 189, 248, 0.2) !important;
+  border-color: #38bdf8 !important;
+}
+
+.login-footer {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding-top: 12px;
 }

@@ -38,6 +38,226 @@ window.computeFastFnv32Hash = function(str) {
   return (hash >>> 0).toString(16);
 };
 
+// ============================================================================
+// TURBO INDEXED DB: High-Capacity Persistent Local Database (Offline-First)
+// ============================================================================
+const TurboIndexedDB = {
+  dbName: "AaryanAquaDB_v4",
+  version: 1,
+  db: null,
+  initPromise: null,
+
+  async init() {
+    if (this.db) return this.db;
+    if (this.initPromise) return this.initPromise;
+    if (typeof indexedDB === 'undefined') return null;
+
+    this.initPromise = new Promise((resolve) => {
+      try {
+        const req = indexedDB.open(this.dbName, this.version);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains("invoices")) db.createObjectStore("invoices", { keyPath: "id" });
+          if (!db.objectStoreNames.contains("products")) db.createObjectStore("products", { keyPath: "id" });
+          if (!db.objectStoreNames.contains("parties")) db.createObjectStore("parties", { keyPath: "id" });
+          if (!db.objectStoreNames.contains("settings")) db.createObjectStore("settings", { keyPath: "key" });
+          if (!db.objectStoreNames.contains("outbox")) db.createObjectStore("outbox", { keyPath: "outboxId", autoIncrement: true });
+        };
+        req.onsuccess = (e) => {
+          this.db = e.target.result;
+          resolve(this.db);
+        };
+        req.onerror = () => resolve(null);
+      } catch (e) {
+        resolve(null);
+      }
+    });
+    return this.initPromise;
+  },
+
+  async saveInvoice(inv) {
+    if (!inv || !inv.id) return;
+    const db = await this.init();
+    if (!db) return;
+    try {
+      const tx = db.transaction("invoices", "readwrite");
+      tx.objectStore("invoices").put(inv);
+    } catch (e) {}
+  },
+
+  async saveAllProducts(products) {
+    if (!Array.isArray(products)) return;
+    const db = await this.init();
+    if (!db) return;
+    try {
+      const tx = db.transaction("products", "readwrite");
+      const store = tx.objectStore("products");
+      store.clear();
+      for (let i = 0; i < products.length; i++) {
+        if (products[i] && products[i].id) store.put(products[i]);
+      }
+    } catch (e) {}
+  },
+
+  async saveAllParties(parties) {
+    if (!Array.isArray(parties)) return;
+    const db = await this.init();
+    if (!db) return;
+    try {
+      const tx = db.transaction("parties", "readwrite");
+      const store = tx.objectStore("parties");
+      store.clear();
+      for (let i = 0; i < parties.length; i++) {
+        if (parties[i] && parties[i].id) store.put(parties[i]);
+      }
+    } catch (e) {}
+  },
+
+  async saveSettings(settings) {
+    const db = await this.init();
+    if (!db) return;
+    try {
+      const tx = db.transaction("settings", "readwrite");
+      tx.objectStore("settings").put({ key: "globalSettings", value: settings });
+    } catch (e) {}
+  }
+};
+window.TurboIndexedDB = TurboIndexedDB;
+TurboIndexedDB.init();
+
+// ============================================================================
+// TURBO OUTBOX QUEUE: Resilient Offline Sync & Auto-Drain Engine
+// ============================================================================
+const TurboOutboxQueue = {
+  queueKey: "turbo_outbox_queue",
+  isFlushing: false,
+  flushTimer: null,
+
+  getItems() {
+    try {
+      return JSON.parse(localStorage.getItem(this.queueKey) || "[]");
+    } catch (e) {
+      return [];
+    }
+  },
+
+  setItems(items) {
+    try {
+      localStorage.setItem(this.queueKey, JSON.stringify(items));
+    } catch (e) {}
+    this.updateBadge();
+  },
+
+  enqueue(action, payload) {
+    const items = this.getItems();
+    const entry = {
+      id: "outbox_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+      action,
+      payload,
+      timestamp: Date.now(),
+      attempts: 0
+    };
+
+    if (action === "save_products" || action === "save_parties" || action === "save_settings") {
+      const existingIdx = items.findIndex(it => it.action === action);
+      if (existingIdx !== -1) {
+        items[existingIdx] = entry;
+      } else {
+        items.push(entry);
+      }
+    } else {
+      items.push(entry);
+    }
+
+    this.setItems(items);
+    if (navigator.onLine) {
+      this.scheduleFlush(200);
+    }
+  },
+
+  updateBadge() {
+    const count = this.getItems().length;
+    if (count > 0 && typeof window.updateCloudSyncBadge === "function") {
+      window.updateCloudSyncBadge("offline_queued");
+    }
+  },
+
+  scheduleFlush(delayMs = 2000) {
+    if (this.flushTimer) clearTimeout(this.flushTimer);
+    this.flushTimer = setTimeout(() => this.flush(), delayMs);
+  },
+
+  async flush() {
+    if (this.isFlushing || !navigator.onLine) return;
+    const items = this.getItems();
+    if (items.length === 0) {
+      if (typeof window.updateCloudSyncBadge === "function") {
+        window.updateCloudSyncBadge("synced");
+      }
+      return;
+    }
+
+    this.isFlushing = true;
+    if (typeof window.updateCloudSyncBadge === "function") {
+      window.updateCloudSyncBadge("syncing");
+    }
+
+    const remaining = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      try {
+        const res = await pushDirectToGoogleDatabaseRaw(item.action, item.payload);
+        if (!res || (!res.ok && !res.success)) {
+          item.attempts = (item.attempts || 0) + 1;
+          remaining.push(item);
+        }
+      } catch (e) {
+        item.attempts = (item.attempts || 0) + 1;
+        remaining.push(item);
+      }
+    }
+
+    this.setItems(remaining);
+    this.isFlushing = false;
+
+    if (remaining.length === 0) {
+      if (typeof window.triggerDatabaseSync === "function") {
+        window.triggerDatabaseSync(true);
+      }
+      if (typeof showFloatingToast === "function") {
+        showFloatingToast("🚀 All offline bills and updates synced with Google Cloud DB!", "success", 3500);
+      }
+    } else {
+      this.scheduleFlush(8000);
+    }
+  }
+};
+window.TurboOutboxQueue = TurboOutboxQueue;
+
+// Online / Offline Connectivity Listeners
+window.addEventListener("online", () => {
+  if (typeof showFloatingToast === "function") {
+    showFloatingToast("🌐 Internet connection restored! Syncing offline outbox...", "success", 3000);
+  }
+  TurboOutboxQueue.flush();
+});
+
+window.addEventListener("offline", () => {
+  if (typeof showFloatingToast === "function") {
+    showFloatingToast("📶 Working Offline. Invoices & changes are securely saved locally!", "warning", 4000);
+  }
+  if (typeof window.updateCloudSyncBadge === "function") {
+    window.updateCloudSyncBadge("offline");
+  }
+});
+
+// Periodic outbox flush heartbeat
+setInterval(() => {
+  if (navigator.onLine && TurboOutboxQueue.getItems().length > 0) {
+    TurboOutboxQueue.flush();
+  }
+}, 15000);
+
 // ----------------------------------------------------------------------------
 // TURBO PREFIX INDEX: Inverted Multi-Token Sub-Nanosecond Indexing (< 2ns search)
 // ----------------------------------------------------------------------------
@@ -381,155 +601,8 @@ window.TurboDataStore = TurboDataStore;
 TurboDataStore.rebuildIndexes();
 
 // ----------------------------------------------------------------------------
-// TURBO INDEXED-DB PERSISTENCE ENGINE (AaryanAquaDB_v3)
+// Persistent Cancelled / Voided Invoices Registry
 // ----------------------------------------------------------------------------
-const TurboIndexedDB = {
-  dbName: 'AaryanAquaDB_v3',
-  version: 3,
-  db: null,
-  isReady: false,
-
-  async init() {
-    if (typeof indexedDB === 'undefined') return;
-    return new Promise((resolve) => {
-      try {
-        const req = indexedDB.open(this.dbName, this.version);
-        req.onupgradeneeded = (e) => {
-          const db = e.target.result;
-          if (!db.objectStoreNames.contains('products')) {
-            db.createObjectStore('products', { keyPath: 'id' });
-          }
-          if (!db.objectStoreNames.contains('parties')) {
-            db.createObjectStore('parties', { keyPath: 'id' });
-          }
-          if (!db.objectStoreNames.contains('invoices')) {
-            db.createObjectStore('invoices', { keyPath: 'id' });
-          }
-          if (!db.objectStoreNames.contains('settings')) {
-            db.createObjectStore('settings', { keyPath: 'key' });
-          }
-          if (!db.objectStoreNames.contains('outbox')) {
-            db.createObjectStore('outbox', { keyPath: 'id', autoIncrement: true });
-          }
-        };
-        req.onsuccess = async (e) => {
-          this.db = e.target.result;
-          this.isReady = true;
-          await this.loadAll();
-          resolve(this.db);
-        };
-        req.onerror = () => {
-          this.isReady = false;
-          resolve(null);
-        };
-      } catch(err) {
-        this.isReady = false;
-        resolve(null);
-      }
-    });
-  },
-
-  async loadAll() {
-    if (!this.db || !this.isReady) return;
-    try {
-      const getStoreRecords = (storeName) => new Promise((res) => {
-        try {
-          const tx = this.db.transaction(storeName, 'readonly');
-          const store = tx.objectStore(storeName);
-          const req = store.getAll();
-          req.onsuccess = () => res(req.result || []);
-          req.onerror = () => res([]);
-        } catch(e) { res([]); }
-      });
-
-      const [pRecs, partRecs, invRecs] = await Promise.all([
-        getStoreRecords('products'),
-        getStoreRecords('parties'),
-        getStoreRecords('invoices')
-      ]);
-
-      let changed = false;
-      if (Array.isArray(pRecs) && pRecs.length > 0 && pRecs.length >= productsDb.length) {
-        productsDb = pRecs;
-        window.productsDb = productsDb;
-        changed = true;
-      }
-      if (Array.isArray(partRecs) && partRecs.length > 0 && partRecs.length >= partiesDb.length) {
-        partiesDb = partRecs;
-        window.partiesDb = partiesDb;
-        changed = true;
-      }
-      if (Array.isArray(invRecs) && invRecs.length > 0 && invRecs.length >= invoicesDb.length) {
-        invoicesDb = invRecs;
-        window.invoicesDb = invoicesDb;
-        changed = true;
-      }
-
-      if (changed) {
-        TurboDataStore.rebuildIndexes();
-        if (typeof updateDashboardOverview === 'function') updateDashboardOverview();
-        if (typeof loadInvoicesHistoryTable === 'function') loadInvoicesHistoryTable();
-      }
-    } catch(e) {}
-  },
-
-  async saveInvoice(inv) {
-    if (!this.db || !this.isReady || !inv || !inv.id) return;
-    try {
-      const tx = this.db.transaction('invoices', 'readwrite');
-      tx.objectStore('invoices').put(inv);
-    } catch(e) {}
-  },
-
-  async saveAllInvoices(invoices) {
-    if (!this.db || !this.isReady || !Array.isArray(invoices)) return;
-    try {
-      const tx = this.db.transaction('invoices', 'readwrite');
-      const store = tx.objectStore('invoices');
-      store.clear();
-      invoices.forEach(inv => { if (inv && inv.id) store.put(inv); });
-    } catch(e) {}
-  },
-
-  async deleteInvoice(id) {
-    if (!this.db || !this.isReady || !id) return;
-    try {
-      const tx = this.db.transaction('invoices', 'readwrite');
-      tx.objectStore('invoices').delete(id);
-    } catch(e) {}
-  },
-
-  async saveAllProducts(products) {
-    if (!this.db || !this.isReady || !Array.isArray(products)) return;
-    try {
-      const tx = this.db.transaction('products', 'readwrite');
-      const store = tx.objectStore('products');
-      store.clear();
-      products.forEach(p => { if (p && p.id) store.put(p); });
-    } catch(e) {}
-  },
-
-  async saveAllParties(parties) {
-    if (!this.db || !this.isReady || !Array.isArray(parties)) return;
-    try {
-      const tx = this.db.transaction('parties', 'readwrite');
-      const store = tx.objectStore('parties');
-      store.clear();
-      parties.forEach(p => { if (p && p.id) store.put(p); });
-    } catch(e) {}
-  }
-};
-
-window.TurboIndexedDB = TurboIndexedDB;
-if (typeof document !== 'undefined') {
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => TurboIndexedDB.init());
-  } else {
-    setTimeout(() => TurboIndexedDB.init(), 10);
-  }
-}
-
-  // Persistent Cancelled / Voided Invoices Registry
   window.archiveCancelledInvoice = function(invoiceRecord, reason = "Cancelled") {
     try {
       if (!invoiceRecord) return;
@@ -1660,9 +1733,55 @@ window.minifyTransferPayload = minifyTransferPayload;
 let directPushProductTimer = null;
 let directPushPartiesTimer = null;
 
+async function pushDirectToGoogleDatabaseRaw(action, payload) {
+  const minPayload = minifyTransferPayload(payload) || {};
+  const gasPayload = {
+    action,
+    auth: API_SECRET_TOKEN,
+    ...minPayload
+  };
+
+  const bodyStr = JSON.stringify(gasPayload);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+  try {
+    const res = await fetch(GOOGLE_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: bodyStr,
+      redirect: "follow",
+      keepalive: true,
+      priority: "high",
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const text = await res.text();
+      let data = null;
+      try { data = JSON.parse(text); } catch (pe) {}
+      if (data && (data.ok || data.success)) {
+        window.lastSyncTimeMs = Date.now();
+        return data;
+      }
+    }
+  } catch (err) {
+    clearTimeout(timeoutId);
+  }
+  return null;
+}
+window.pushDirectToGoogleDatabaseRaw = pushDirectToGoogleDatabaseRaw;
+
 async function pushDirectToGoogleDatabase(action, payload, maxRetries = 2) {
   if (typeof window.updateCloudSyncBadge === "function") {
-    window.updateCloudSyncBadge("syncing");
+    window.updateCloudSyncBadge(navigator.onLine ? "syncing" : "offline_queued");
+  }
+
+  // If currently offline, enqueue immediately to TurboOutboxQueue without waiting
+  if (!navigator.onLine) {
+    if (window.TurboOutboxQueue) window.TurboOutboxQueue.enqueue(action, payload);
+    return { ok: true, offline: true };
   }
 
   const minPayload = minifyTransferPayload(payload) || {};
@@ -1711,6 +1830,11 @@ async function pushDirectToGoogleDatabase(action, payload, maxRetries = 2) {
     }
   }
 
+  // Network attempt failed or timed out — fallback to TurboOutboxQueue so data is never lost
+  if (window.TurboOutboxQueue) {
+    window.TurboOutboxQueue.enqueue(action, payload);
+  }
+
   // Fire-and-forget fallback via sendBeacon so writes survive tab closure
   try {
     if (navigator.sendBeacon) {
@@ -1719,7 +1843,7 @@ async function pushDirectToGoogleDatabase(action, payload, maxRetries = 2) {
     }
   } catch (e) {}
 
-  return null;
+  return { ok: true, queued: true };
 }
 
 window.pushDirectToGoogleDatabase = pushDirectToGoogleDatabase;
@@ -1827,14 +1951,22 @@ window.updateCloudSyncBadge = function(status) {
   const now = Date.now();
   const diffSec = Math.max(0, Math.floor((now - (window.lastSyncTimeMs || now)) / 1000));
   const timeText = diffSec <= 2 ? "1s Live" : `${diffSec}s ago`;
+  const outboxCount = (window.TurboOutboxQueue && typeof window.TurboOutboxQueue.getItems === 'function') ? window.TurboOutboxQueue.getItems().length : 0;
 
   if (status === "syncing") {
     badge.className = "cloud-sync-pill syncing cursor-pointer";
-    if (textEl) textEl.innerHTML = `<span class="realtime-sync-spinning">🔄</span> Syncing...`;
+    if (textEl) textEl.innerHTML = `<span class="realtime-sync-spinning">🔄</span> Syncing ${outboxCount > 0 ? `(${outboxCount})` : ''}...`;
     if (radarDot) radarDot.style.display = "none";
-  } else if (status === "offline" || !navigator.onLine) {
+  } else if (status === "offline" || status === "offline_queued" || !navigator.onLine) {
     badge.className = "cloud-sync-pill offline cursor-pointer";
-    if (textEl) textEl.textContent = "Offline (Queued)";
+    if (textEl) textEl.textContent = outboxCount > 0 ? `⚡ ${outboxCount} Saved Offline` : "📶 Offline Mode";
+    if (radarDot) {
+      radarDot.style.display = "inline-block";
+      radarDot.className = "realtime-radar-dot offline";
+    }
+  } else if (outboxCount > 0) {
+    badge.className = "cloud-sync-pill offline cursor-pointer";
+    if (textEl) textEl.textContent = `⚡ ${outboxCount} Pending Sync`;
     if (radarDot) {
       radarDot.style.display = "inline-block";
       radarDot.className = "realtime-radar-dot offline";
