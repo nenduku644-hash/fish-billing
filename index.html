@@ -235,9 +235,9 @@
             </div>
           </div>
           <div class="header-tools-group">
-            <div id="live-telugu-voice-pill" class="voice-ai-pill cursor-pointer" onclick="toggleTeluguVoiceAssistant()" title="తెలుగు వాయిస్ అసిస్టెంట్ (Telugu Voice AI Assistant - Alt+V)">
-              <i class="fa-solid fa-microphone-lines" id="voice-ai-icon" style="color: #ec4899;"></i>
-              <span id="voice-ai-pill-text">తెలుగు AI <kbd>Alt+V</kbd></span>
+            <div id="live-turbo-hub-pill" class="turbo-hub-pill cursor-pointer" onclick="openCommandPalette()" title="Turbo Intelligence & Fast Search Hub (Ctrl+K / Alt+K)">
+              <i class="fa-solid fa-bolt-lightning text-cyan" id="turbo-hub-icon"></i>
+              <span id="turbo-hub-pill-text">Turbo Hub <kbd>Ctrl+K</kbd></span>
             </div>
             <div id="live-data-share-pill" class="data-share-pill cursor-pointer" onclick="openDataSharingModal()" title="Advanced Data Sharing & P2P Quick Sync">
               <i class="fa-solid fa-share-nodes" style="color: #0284c7;"></i>
@@ -807,10 +807,10 @@
                   <input type="text" id="bill-item-hsn" placeholder="HSN (e.g. 23099090)">
                 </div>
 
-                <!-- QTY with Interactive Micro-Steppers & Quick Presets -->
+                <!-- QTY with Interactive Micro-Steppers, Multi-Lot Weight Summation & Quick Presets -->
                 <div class="form-group flex-item-qty" style="position: relative;">
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                    <label style="margin: 0;">QTY</label>
+                    <label style="margin: 0;">QTY / WEIGHT</label>
                     <div class="qty-quick-chips">
                       <span class="qty-chip" onclick="setBillingQtyPreset(5)" title="Add 5">+5</span>
                       <span class="qty-chip" onclick="setBillingQtyPreset(10)" title="Add 10">+10</span>
@@ -819,8 +819,12 @@
                   </div>
                   <div class="qty-stepper-box">
                     <button type="button" class="btn-qty-step minus" onclick="stepBillingQty(-1)" title="Decrease Qty">–</button>
-                    <input type="number" id="bill-item-qty" value="1" min="1" step="1" oninput="handleBillingQtyInput()">
+                    <input type="number" id="bill-item-qty" value="1" min="0.01" step="any" oninput="handleBillingQtyInput()" title="Enter Weight / Qty or Multi-Lot (e.g. 25.5 + 30.2)">
                     <button type="button" class="btn-qty-step plus" onclick="stepBillingQty(1)" title="Increase Qty">+</button>
+                  </div>
+                  <div id="multi-lot-summary-pill" class="multi-lot-summary-pill hidden" title="Multi-Basket Weight Live Summation">
+                    <i class="fa-solid fa-calculator text-cyan"></i>
+                    <span id="multi-lot-summary-text">∑ 0 Lots = 0.00 Kg</span>
                   </div>
                   <div id="qty-stock-warning" class="qty-warning-bubble hidden">
                     <span id="qty-warning-text"><i class="fa-solid fa-triangle-exclamation"></i> Exceeds stock!</span>
@@ -4146,80 +4150,124 @@
     </div>
   </div>
 
-  <!-- TELUGU VOICE AI ASSISTANT MODAL (తెలుగు వాయిస్ అసిస్టెంట్) -->
-  <div id="telugu-voice-modal" class="telugu-voice-modal hidden no-print" onclick="if(event.target === this) toggleTeluguVoiceAssistant()">
-    <div class="telugu-voice-card" role="dialog" aria-label="Telugu Voice Assistant">
-      <div class="telugu-voice-header">
-        <div>
-          <h3><i class="fa-solid fa-microphone-lines"></i> తెలుగు వాయిస్ అసిస్టెంట్</h3>
-          <span class="voice-sub">Aaryan Aqua Intelligent Voice AI • Telugu &amp; English</span>
+  <!-- ============================================================================
+       TURBO INTELLIGENCE & GLOBAL COMMAND SPOTLIGHT HUB (Ctrl+K / Alt+K)
+       ============================================================================ -->
+  <div id="global-command-palette-modal" class="turbo-omni-modal hidden no-print" onclick="if(event.target === this) closeCommandPalette()">
+    <div class="turbo-omni-card" role="dialog" aria-label="Turbo Command Hub">
+      
+      <!-- Top Search Header with Filter Tabs -->
+      <div class="turbo-omni-header">
+        <div class="turbo-search-input-wrap">
+          <i class="fa-solid fa-bolt-lightning turbo-search-icon"></i>
+          <input type="text" id="cmd-palette-input" class="turbo-search-input" placeholder="Type anything: customer, fish item, invoice #, or command..." autocomplete="off" spellcheck="false">
+          <button type="button" class="turbo-clear-btn hidden" id="turbo-clear-btn" onclick="clearTurboSearch()" title="Clear Search (Esc)">
+            <i class="fa-solid fa-circle-xmark"></i>
+          </button>
+          <span class="turbo-esc-tag" onclick="closeCommandPalette()" title="Press Esc to Close"><kbd>Esc</kbd></span>
         </div>
-        <button type="button" class="telugu-voice-close-btn" onclick="toggleTeluguVoiceAssistant()" aria-label="Close Assistant">
+
+        <div class="turbo-filter-tabs">
+          <button type="button" class="turbo-filter-tab active" data-filter="all" onclick="setTurboFilter('all')">
+            <i class="fa-solid fa-asterisk"></i> All <span class="tab-count" id="turbo-count-all">0</span>
+          </button>
+          <button type="button" class="turbo-filter-tab" data-filter="parties" onclick="setTurboFilter('parties')">
+            <i class="fa-solid fa-users"></i> Customers <span class="tab-count" id="turbo-count-parties">0</span>
+          </button>
+          <button type="button" class="turbo-filter-tab" data-filter="products" onclick="setTurboFilter('products')">
+            <i class="fa-solid fa-fish"></i> Fish Stock <span class="tab-count" id="turbo-count-products">0</span>
+          </button>
+          <button type="button" class="turbo-filter-tab" data-filter="invoices" onclick="setTurboFilter('invoices')">
+            <i class="fa-solid fa-file-invoice-dollar"></i> Invoices <span class="tab-count" id="turbo-count-invoices">0</span>
+          </button>
+          <button type="button" class="turbo-filter-tab" data-filter="actions" onclick="setTurboFilter('actions')">
+            <i class="fa-solid fa-bolt"></i> Actions <span class="tab-count" id="turbo-count-actions">0</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Metrics Summary Bar (When query is empty) -->
+      <div id="turbo-metrics-bar" class="turbo-metrics-bar">
+        <div class="turbo-metric-item" onclick="switchTab('reports'); closeCommandPalette();" title="View Sales Report">
+          <span class="metric-label"><i class="fa-solid fa-chart-line text-cyan"></i> Today's Sales</span>
+          <span class="metric-value text-cyan" id="turbo-metric-today-sales">₹0</span>
+        </div>
+        <div class="turbo-metric-item" onclick="switchTab('parties'); closeCommandPalette();" title="View Customer Khata">
+          <span class="metric-label"><i class="fa-solid fa-wallet text-amber"></i> Total Due (Khata)</span>
+          <span class="metric-value text-amber" id="turbo-metric-total-due">₹0</span>
+        </div>
+        <div class="turbo-metric-item" onclick="switchTab('products'); closeCommandPalette();" title="View Low Stock">
+          <span class="metric-label"><i class="fa-solid fa-triangle-exclamation text-rose"></i> Low Stock</span>
+          <span class="metric-value text-rose" id="turbo-metric-low-stock">0 Items</span>
+        </div>
+        <div class="turbo-metric-item" onclick="openWhatsAppBotModal(); closeCommandPalette();" title="WhatsApp Bot Status">
+          <span class="metric-label"><i class="fa-brands fa-whatsapp text-emerald"></i> WhatsApp Bot</span>
+          <span class="metric-value text-emerald" id="turbo-metric-wa-status">Connected</span>
+        </div>
+      </div>
+
+      <!-- Results Container -->
+      <div id="cmd-palette-results" class="turbo-omni-results">
+        <!-- Dynamically rendered items -->
+      </div>
+
+      <!-- Footer Quick Hotkey Tips -->
+      <div class="turbo-omni-footer">
+        <div class="turbo-footer-shortcuts">
+          <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
+          <span><kbd>Enter</kbd> Open / Action</span>
+          <span><kbd>Tab</kbd> Switch Tab</span>
+          <span><kbd>Esc</kbd> Close</span>
+        </div>
+        <div class="turbo-footer-info">
+          <i class="fa-solid fa-bolt-lightning text-cyan"></i> Aaryan Aqua Turbo Engine ⚡
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DYNAMIC UPI PAYMENT QR MODAL -->
+  <div id="dynamic-upi-qr-modal" class="turbo-omni-modal hidden no-print" onclick="if(event.target === this) closeDynamicUpiModal()">
+    <div class="upi-qr-card" role="dialog" aria-label="Dynamic UPI Payment">
+      <div class="upi-qr-header">
+        <div>
+          <h3><i class="fa-solid fa-qrcode text-cyan"></i> Dynamic UPI Instant Pay</h3>
+          <span class="upi-qr-sub">Scan with PhonePe, Google Pay, Paytm or BHIM</span>
+        </div>
+        <button type="button" class="btn-close-modal" onclick="closeDynamicUpiModal()">
           <i class="fa-solid fa-xmark"></i>
         </button>
       </div>
-
-      <div class="telugu-voice-body">
-        <div id="voice-wave-visualizer" class="voice-wave-container">
-          <div class="voice-wave-bar"></div>
-          <div class="voice-wave-bar"></div>
-          <div class="voice-wave-bar"></div>
-          <div class="voice-wave-bar"></div>
-          <div class="voice-wave-bar"></div>
+      <div class="upi-qr-body">
+        <div class="upi-amount-badge">
+          <span class="upi-amt-label">Bill Amount to Pay:</span>
+          <strong class="upi-amt-val" id="dynamic-upi-amount-text">₹ 0.00</strong>
         </div>
-
-        <div id="voice-status-badge" class="voice-status-badge">
-          <i class="fa-solid fa-microphone"></i> <span id="voice-status-text">మైక్ బటన్ నొక్కి మాట్లాడండి (Tap Mic to Speak)</span>
+        <div class="upi-qr-image-wrapper">
+          <img id="dynamic-upi-qr-img" src="" alt="UPI QR Code" class="upi-qr-img">
         </div>
-
-        <div class="voice-transcript-wrapper">
-          <div class="voice-bubble voice-user-bubble">
-            <div class="bubble-label"><i class="fa-solid fa-user"></i> మీరు అడిగింది (Your Query)</div>
-            <div id="voice-user-transcript">ఏదైనా అడగండి... (e.g. "ఈ రోజు సేల్స్ ఎంత?", "కొత్త బిల్లు రాయి")</div>
+        <div class="upi-meta-details">
+          <div class="upi-meta-row">
+            <span>Payee:</span>
+            <strong id="dynamic-upi-merchant-name">Aaryan Aqua Needs</strong>
           </div>
-
-          <div class="voice-bubble voice-ai-bubble">
-            <div class="bubble-label"><i class="fa-solid fa-robot"></i> అసిస్టెంట్ సమాధానం (AI Response)</div>
-            <div id="voice-ai-response">నమస్కారం! నేను మీ ఆర్యన్ ఆక్వా వాయిస్ అసిస్టెంట్‌ని. మాట్లాడటానికి క్రింది మైక్ బటన్ నొక్కండి.</div>
+          <div class="upi-meta-row">
+            <span>UPI ID:</span>
+            <strong id="dynamic-upi-id-text">aaryan@upi</strong>
+          </div>
+          <div class="upi-meta-row">
+            <span>Invoice #:</span>
+            <strong id="dynamic-upi-inv-no">—</strong>
           </div>
         </div>
-
-        <div class="quick-voice-prompts-title">
-          <i class="fa-solid fa-bolt text-pink"></i> త్వరిత ఆదేశాలు (Quick Commands):
-        </div>
-        <div class="quick-voice-prompts">
-          <button type="button" class="voice-prompt-chip" onclick="executeVoiceCommandQuery('ఈ రోజు సేల్స్ ఎంత')">
-            <i class="fa-solid fa-chart-line text-cyan"></i> ఈ రోజు సేల్స్
+        <div class="upi-action-btns">
+          <button type="button" class="btn btn-whatsapp" id="btn-upi-wa-share" onclick="shareDynamicUpiWhatsApp()">
+            <i class="fa-brands fa-whatsapp"></i> Send Payment Link on WhatsApp
           </button>
-          <button type="button" class="voice-prompt-chip" onclick="executeVoiceCommandQuery('కొత్త ఇన్వాయిస్ రాయి')">
-            <i class="fa-solid fa-file-invoice-dollar text-emerald"></i> కొత్త బిల్లు
-          </button>
-          <button type="button" class="voice-prompt-chip" onclick="executeVoiceCommandQuery('కస్టమర్ల బ్యాలెన్స్ ఎంత')">
-            <i class="fa-solid fa-wallet text-amber"></i> బ్యాలెన్స్ వివరాలు
-          </button>
-          <button type="button" class="voice-prompt-chip" onclick="executeVoiceCommandQuery('స్టాక్ వివరాలు')">
-            <i class="fa-solid fa-cubes text-purple"></i> స్టాక్ సమాచారం
-          </button>
-          <button type="button" class="voice-prompt-chip" onclick="executeVoiceCommandQuery('వాట్సాప్ స్టేటస్')">
-            <i class="fa-brands fa-whatsapp text-emerald"></i> వాట్సాప్ స్టేటస్
+          <button type="button" class="btn btn-secondary" onclick="closeDynamicUpiModal()">
+            Done / Close
           </button>
         </div>
-      </div>
-
-      <div class="telugu-voice-footer">
-        <div class="voice-lang-switch">
-          <span>భాష:</span>
-          <button type="button" id="btn-lang-te" class="voice-lang-btn active" onclick="setVoiceAssistantLang('te-IN')">తెలుగు</button>
-          <button type="button" id="btn-lang-en" class="voice-lang-btn" onclick="setVoiceAssistantLang('en-IN')">English</button>
-        </div>
-
-        <button type="button" id="voice-main-mic-btn" class="voice-action-btn-main" onclick="toggleVoiceListening()" title="Start / Stop Listening">
-          <i class="fa-solid fa-microphone" id="voice-main-mic-icon"></i>
-        </button>
-
-        <button type="button" class="btn btn-secondary btn-sm" onclick="replayLastVoiceResponse()" title="Re-speak Response">
-          <i class="fa-solid fa-volume-high"></i> మళ్ళీ వినండి
-        </button>
       </div>
     </div>
   </div>
@@ -4250,7 +4298,7 @@
     </button>
   </nav>
 
-  <script src="index_v5.js?v=407_customer_only_whatsapp_dispatch"></script>
+  <script src="index_v5.js?v=408_turbo_engine_advanced_billing"></script>
 </body>
 </html>
 

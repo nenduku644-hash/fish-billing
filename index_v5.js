@@ -3937,13 +3937,40 @@ function bindBillingFormInputs() {
 
   // --- ENHANCED KEYBOARD SHORTCUTS CONTROLLER ---
   let cmdPaletteSelectedIndex = 0;
+  // ============================================================================
+  // TURBO INTELLIGENCE & GLOBAL COMMAND SPOTLIGHT HUB (Ctrl+K / Alt+K)
+  // ============================================================================
   let currentCmdPaletteItems = [];
+  let currentTurboFilter = 'all'; // 'all' | 'parties' | 'products' | 'invoices' | 'actions'
+
+  window.setTurboFilter = function(filter) {
+    currentTurboFilter = filter || 'all';
+    document.querySelectorAll('.turbo-filter-tab').forEach(tab => {
+      tab.classList.toggle('active', tab.dataset.filter === currentTurboFilter);
+    });
+    const cmdInput = document.getElementById("cmd-palette-input");
+    window.renderCommandPalette(cmdInput ? cmdInput.value : "");
+    if (cmdInput) cmdInput.focus();
+  };
+
+  window.clearTurboSearch = function() {
+    const cmdInput = document.getElementById("cmd-palette-input");
+    if (cmdInput) {
+      cmdInput.value = "";
+      window.renderCommandPalette("");
+      cmdInput.focus();
+    }
+  };
 
   window.openCommandPalette = function() {
     const modal = document.getElementById("global-command-palette-modal");
     if (modal) {
       modal.classList.remove("hidden");
       modal.style.display = "flex";
+      currentTurboFilter = 'all';
+      document.querySelectorAll('.turbo-filter-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.filter === 'all');
+      });
       const cmdInput = document.getElementById("cmd-palette-input");
       if (cmdInput) {
         cmdInput.value = "";
@@ -3964,38 +3991,281 @@ function bindBillingFormInputs() {
     }
   };
 
+  window.quickBillForParty = function(partyName, partyPhone = '') {
+    window.closeCommandPalette();
+    switchTab('billing');
+    setTimeout(() => {
+      if (typeof autoSuggestInvoiceNo === 'function') autoSuggestInvoiceNo();
+      if (elements.billBuyerName) {
+        elements.billBuyerName.value = partyName;
+        elements.billBuyerName.dispatchEvent(new Event('input'));
+      }
+      if (partyPhone && elements.billBuyerPhone) {
+        elements.billBuyerPhone.value = partyPhone;
+      }
+      const searchInput = document.getElementById("smart-product-search");
+      if (searchInput) {
+        searchInput.focus();
+        window.openSmartProductPopover();
+      }
+      if (typeof showFloatingToast === 'function') {
+        showFloatingToast(`⚡ Ready to bill for ${partyName}`, 3000);
+      }
+    }, 120);
+  };
+
+  window.addProductToActiveBill = function(prodId) {
+    window.closeCommandPalette();
+    switchTab('billing');
+    setTimeout(() => {
+      const prod = (productsDb || []).find(p => p && (p.id === prodId || p.description === prodId));
+      if (prod && typeof window.selectSmartProduct === 'function') {
+        window.selectSmartProduct(prod.id || prod.description, prod.description, prod.salesRate || prod.price || 0, prod.hsn || '', prod.unit || 'Kg', prod.taxRate || 0, prod.stock || 0);
+        if (typeof showFloatingToast === 'function') {
+          showFloatingToast(`🐟 Added "${prod.description}" to bill`, 2500);
+        }
+      }
+    }, 120);
+  };
+
   window.renderCommandPalette = function(query = "") {
     const listEl = document.getElementById("cmd-palette-results");
+    const clearBtn = document.getElementById("turbo-clear-btn");
+    const metricsBar = document.getElementById("turbo-metrics-bar");
     if (!listEl) return;
-    const q = (query || "").trim().toLowerCase();
 
-    const allItems = [
-      { id: 'new_bill', title: 'New GST Invoice', subtitle: 'Start creating a new invoice (Alt+N)', icon: 'fa-plus', action: () => switchTab('billing') },
-      { id: 'history', title: 'Invoice History', subtitle: 'View past invoices and payments (Alt+H)', icon: 'fa-clock-rotate-left', action: () => switchTab('history') },
-      { id: 'products', title: 'Products & Inventory', subtitle: 'Manage stock and price list (Alt+P)', icon: 'fa-cubes', action: () => switchTab('products') },
-      { id: 'parties', title: 'Customers & Parties', subtitle: 'Manage customer accounts (Alt+C)', icon: 'fa-users', action: () => switchTab('parties') },
-      { id: 'reports', title: 'Reports & Analytics', subtitle: 'Sales analytics and financial summaries (Alt+R)', icon: 'fa-chart-pie', action: () => switchTab('reports') },
-      { id: 'settings', title: 'Settings & Profile', subtitle: 'Business info, bank details, and GST (Alt+S)', icon: 'fa-gear', action: () => switchTab('settings') },
-      { id: 'shortcuts', title: 'Keyboard Shortcuts', subtitle: 'View all quick hotkeys (Alt+/)', icon: 'fa-keyboard', action: () => window.openKeyboardShortcutsModal() },
-      { id: 'restock', title: 'Quick Inward Restock', subtitle: 'Receive stock shipment (F2)', icon: 'fa-boxes-packing', action: () => window.triggerQuickInwardFromBilling() },
-      { id: 'calc', title: 'Quick Calculator', subtitle: 'Open built-in floating calculator (Alt+C)', icon: 'fa-calculator', action: () => { if (typeof toggleCalc === 'function') toggleCalc(); } }
+    const q = (query || "").trim().toLowerCase();
+    if (clearBtn) clearBtn.classList.toggle("hidden", !q);
+    if (metricsBar) metricsBar.style.display = q ? "none" : "grid";
+
+    // 1. Compute Live Stats for Metrics Bar
+    const todayStr = new Date().toISOString().split('T')[0];
+    const invoices = (window.invoicesHistory || invoicesDb || []);
+    let todaySales = 0;
+    let totalDue = 0;
+    invoices.forEach(inv => {
+      const d = inv.details || inv;
+      const invDate = inv.date || d.invoiceDate || "";
+      if (String(invDate).startsWith(todayStr)) {
+        todaySales += Number(d.grandTotal || d.total || inv.grandTotal || 0);
+      }
+      const bal = Number(d.balanceDue || inv.balanceDue || 0);
+      if (bal > 0) totalDue += bal;
+    });
+
+    const products = (productsDb || window.allProducts || []);
+    const lowStockCount = products.filter(p => {
+      const s = parseInt(p?.stock, 10);
+      return !isNaN(s) && s <= 10;
+    }).length;
+
+    const waStatusPill = document.getElementById("live-whatsapp-pill");
+    const isWaConnected = waStatusPill && waStatusPill.classList.contains("connected");
+
+    const mTodaySales = document.getElementById("turbo-metric-today-sales");
+    const mTotalDue = document.getElementById("turbo-metric-total-due");
+    const mLowStock = document.getElementById("turbo-metric-low-stock");
+    const mWaStatus = document.getElementById("turbo-metric-wa-status");
+
+    if (mTodaySales) mTodaySales.textContent = `₹ ${Math.round(todaySales).toLocaleString('en-IN')}`;
+    if (mTotalDue) mTotalDue.textContent = `₹ ${Math.round(totalDue).toLocaleString('en-IN')}`;
+    if (mLowStock) mLowStock.textContent = `${lowStockCount} Items`;
+    if (mWaStatus) {
+      mWaStatus.textContent = isWaConnected ? "Connected 🟢" : "Offline 🔴";
+      mWaStatus.style.color = isWaConnected ? "#16a34a" : "#dc2626";
+    }
+
+    // 2. Gather All Categorized Items
+    const partyItems = [];
+    const parties = (partiesDb || []);
+    parties.forEach(party => {
+      const name = party.name || party.customerName || "Customer";
+      const phone = party.phone || party.mobile || "";
+      const address = party.address || "";
+      // Calculate total customer outstanding balance across past invoices
+      let partyDue = 0;
+      let billCount = 0;
+      invoices.forEach(inv => {
+        const d = inv.details || inv;
+        const buyer = d.buyer || inv.buyer || {};
+        const bName = String(buyer.name || inv.customerName || d.customerName || "").trim().toLowerCase();
+        if (bName && bName === name.trim().toLowerCase()) {
+          partyDue += Number(d.balanceDue || inv.balanceDue || 0);
+          billCount++;
+        }
+      });
+
+      partyItems.push({
+        type: 'party',
+        id: 'party_' + (party.id || name),
+        title: name,
+        subtitle: `${phone ? '📞 ' + phone : ''} ${address ? '• ' + address : ''} • ${billCount} Past Bills`,
+        badge: partyDue > 0 ? `₹ ${Math.round(partyDue).toLocaleString('en-IN')} Due` : 'Khata Clear',
+        badgeClass: partyDue > 0 ? 'due' : 'clear',
+        icon: 'fa-user-tie',
+        searchStr: `${name} ${phone} ${address}`.toLowerCase(),
+        action: () => window.quickBillForParty(name, phone),
+        quickActions: [
+          { label: '⚡ Bill', icon: 'fa-plus', action: `window.quickBillForParty('${name.replace(/'/g, "\\'")}', '${phone}')` },
+          { label: '📱 Statement', icon: 'fa-whatsapp', action: `sendPartyWhatsAppStatement('${name.replace(/'/g, "\\'")}', '${phone}')` }
+        ]
+      });
+    });
+
+    const productItems = [];
+    products.forEach(p => {
+      const name = p.description || p.name || "Product";
+      const rate = Number(p.salesRate || p.price || 0);
+      const stock = parseInt(p.stock, 10) || 0;
+      const unit = p.unit || "Kg";
+      const hsn = p.hsn || "";
+      productItems.push({
+        type: 'product',
+        id: 'prod_' + (p.id || name),
+        title: name,
+        subtitle: `Rate: ₹ ${rate}/${unit} ${hsn ? '• HSN: ' + hsn : ''}`,
+        badge: stock <= 0 ? 'Out of Stock' : (stock <= 10 ? `Low: ${stock} ${unit}` : `Stock: ${stock} ${unit}`),
+        badgeClass: stock <= 0 ? 'low' : (stock <= 10 ? 'low' : 'stock'),
+        icon: 'fa-fish',
+        searchStr: `${name} ${hsn} ${p.category || ''}`.toLowerCase(),
+        action: () => window.addProductToActiveBill(p.id || name),
+        quickActions: [
+          { label: '➕ Add to Bill', icon: 'fa-cart-plus', action: `window.addProductToActiveBill('${p.id || name}')` }
+        ]
+      });
+    });
+
+    const invoiceItems = [];
+    invoices.slice(0, 50).forEach(inv => {
+      const d = inv.details || inv;
+      const invNo = inv.invoiceNo || d.invoiceNo || "INV";
+      const buyer = d.buyer || inv.buyer || {};
+      const buyerName = buyer.name || inv.customerName || d.customerName || "Customer";
+      const date = inv.date || d.invoiceDate || "";
+      const total = Number(d.grandTotal || d.total || inv.grandTotal || 0);
+      const balance = Number(d.balanceDue || inv.balanceDue || 0);
+      const status = balance <= 0 ? 'Paid' : (balance >= total ? 'Unpaid' : 'Partial');
+
+      invoiceItems.push({
+        type: 'invoice',
+        id: 'inv_' + (inv.id || invNo),
+        title: `Invoice #${invNo} • ${buyerName}`,
+        subtitle: `Date: ${date} • Total: ₹ ${Math.round(total).toLocaleString('en-IN')}`,
+        badge: status === 'Paid' ? 'Paid' : `Due: ₹ ${Math.round(balance).toLocaleString('en-IN')}`,
+        badgeClass: status === 'Paid' ? 'paid' : 'due',
+        icon: 'fa-file-invoice-dollar',
+        searchStr: `${invNo} ${buyerName} ${date}`.toLowerCase(),
+        action: () => {
+          window.closeCommandPalette();
+          if (typeof previewSavedInvoice === 'function') previewSavedInvoice(inv.id || invNo);
+        },
+        quickActions: [
+          { label: '🖨️ Print', icon: 'fa-print', action: `printSavedInvoice('${inv.id || invNo}')` },
+          { label: '📱 WhatsApp', icon: 'fa-whatsapp', action: `shareInvoiceWhatsApp('${inv.id || invNo}')` }
+        ]
+      });
+    });
+
+    const systemActionItems = [
+      { type: 'action', id: 'act_new_bill', title: 'New GST Invoice', subtitle: 'Open blank invoice form (Alt+N)', icon: 'fa-plus', searchStr: 'new invoice bill create gst', action: () => switchTab('billing') },
+      { type: 'action', id: 'act_daily_digest', title: 'Today\'s Sales & Profit Analytics', subtitle: 'View real-time daily revenue and collection report', icon: 'fa-chart-pie', searchStr: 'today sales report profit analytics daily', action: () => switchTab('reports') },
+      { type: 'action', id: 'act_parties', title: 'Customer Khata & Balance Directory', subtitle: 'Manage customer accounts, send payment reminders', icon: 'fa-users', searchStr: 'customers parties khata balance due directory', action: () => switchTab('parties') },
+      { type: 'action', id: 'act_stock', title: 'Fish & Feed Inventory Management', subtitle: 'View stock balances, inward restock, price list', icon: 'fa-cubes', searchStr: 'products fish inventory stock restock feed', action: () => switchTab('products') },
+      { type: 'action', id: 'act_history', title: 'Past Invoice History & Statements', subtitle: 'Search and reprint previous bills and payment slips', icon: 'fa-clock-rotate-left', searchStr: 'history invoices past bills receipts archive', action: () => switchTab('history') },
+      { type: 'action', id: 'act_wa_bot', title: 'WhatsApp Bot Control & QR Linking', subtitle: 'Check bot daemon status and link WhatsApp device', icon: 'fa-whatsapp', searchStr: 'whatsapp bot status connect qr qr ready daemon', action: () => openWhatsAppBotModal() },
+      { type: 'action', id: 'act_cloud_sync', title: 'Google Database Cloud Sync Now', subtitle: 'Trigger instant 2-way cloud synchronization with Google Sheets', icon: 'fa-cloud-arrow-up', searchStr: 'cloud sync google sheet backup database', action: () => { if (typeof syncDatabaseToServer === 'function') syncDatabaseToServer(); showFloatingToast('☁️ Cloud database synchronized successfully!', 2500); } },
+      { type: 'action', id: 'act_export_excel', title: 'Export Invoices to Excel / CSV', subtitle: 'Download complete billing dataset spreadsheet', icon: 'fa-file-excel', searchStr: 'export excel csv download backup reports', action: () => { if (typeof exportInvoicesToExcel === 'function') exportInvoicesToExcel(); else showFloatingToast('Exporting to spreadsheet...', 2000); } },
+      { type: 'action', id: 'act_calc', title: 'Quick Floating Calculator', subtitle: 'Open speed calculator & net weight injector (Alt+C)', icon: 'fa-calculator', searchStr: 'calculator calc math weight lots', action: () => toggleQuickCalculator() },
+      { type: 'action', id: 'act_shortcuts', title: 'Keyboard Hotkeys Cheatsheet', subtitle: 'View all fast keyboard shortcuts (Alt+/)', icon: 'fa-keyboard', searchStr: 'keyboard shortcuts hotkeys keys fast', action: () => openKeyboardShortcutsModal() }
     ];
 
-    currentCmdPaletteItems = q ? allItems.filter(it => it.title.toLowerCase().includes(q) || it.subtitle.toLowerCase().includes(q)) : allItems;
-    if (currentCmdPaletteItems.length === 0) {
-      listEl.innerHTML = '<div style="padding: 16px; text-align: center; color: #94a3b8; font-size: 13px;">No matching actions found</div>';
+    // Filter by query
+    const filterList = (arr) => q ? arr.filter(it => it.searchStr.includes(q) || it.title.toLowerCase().includes(q)) : arr;
+
+    const filteredParties = filterList(partyItems);
+    const filteredProducts = filterList(productItems);
+    const filteredInvoices = filterList(invoiceItems);
+    const filteredActions = filterList(systemActionItems);
+
+    // Update Tab Counts
+    const cAll = filteredParties.length + filteredProducts.length + filteredInvoices.length + filteredActions.length;
+    const countAll = document.getElementById("turbo-count-all");
+    const countParties = document.getElementById("turbo-count-parties");
+    const countProducts = document.getElementById("turbo-count-products");
+    const countInvoices = document.getElementById("turbo-count-invoices");
+    const countActions = document.getElementById("turbo-count-actions");
+
+    if (countAll) countAll.textContent = cAll;
+    if (countParties) countParties.textContent = filteredParties.length;
+    if (countProducts) countProducts.textContent = filteredProducts.length;
+    if (countInvoices) countInvoices.textContent = filteredInvoices.length;
+    if (countActions) countActions.textContent = filteredActions.length;
+
+    // Combine based on active tab
+    let displayList = [];
+    if (currentTurboFilter === 'parties') {
+      displayList = filteredParties;
+    } else if (currentTurboFilter === 'products') {
+      displayList = filteredProducts;
+    } else if (currentTurboFilter === 'invoices') {
+      displayList = filteredInvoices;
+    } else if (currentTurboFilter === 'actions') {
+      displayList = filteredActions;
+    } else {
+      // 'all': Show a curated balanced list
+      if (q) {
+        displayList = [
+          ...filteredParties.slice(0, 5),
+          ...filteredProducts.slice(0, 5),
+          ...filteredInvoices.slice(0, 5),
+          ...filteredActions.slice(0, 4)
+        ];
+      } else {
+        displayList = [
+          ...filteredActions.slice(0, 4),
+          ...filteredParties.slice(0, 4),
+          ...filteredProducts.slice(0, 4),
+          ...filteredInvoices.slice(0, 4)
+        ];
+      }
+    }
+
+    currentCmdPaletteItems = displayList;
+
+    if (displayList.length === 0) {
+      listEl.innerHTML = `
+        <div style="padding: 32px 16px; text-align: center; color: #94a3b8;">
+          <i class="fa-solid fa-magnifying-glass" style="font-size: 28px; opacity: 0.4; margin-bottom: 8px;"></i>
+          <div style="font-size: 14px; font-weight: 600; color: #64748b;">No matching results for "${query}"</div>
+          <div style="font-size: 12px; margin-top: 4px;">Try searching with a customer name, fish species, or invoice number.</div>
+        </div>
+      `;
       return;
     }
 
-    listEl.innerHTML = currentCmdPaletteItems.map((it, idx) => `
-      <div class="cmd-palette-item ${idx === cmdPaletteSelectedIndex ? 'selected' : ''}" 
+    listEl.innerHTML = displayList.map((it, idx) => `
+      <div class="turbo-result-item type-${it.type} ${idx === cmdPaletteSelectedIndex ? 'selected' : ''}"
            onclick="window.executeCommandPaletteItem(${idx})"
-           style="padding: 10px 14px; display: flex; align-items: center; gap: 12px; cursor: pointer; border-radius: 8px; ${idx === cmdPaletteSelectedIndex ? 'background: rgba(6, 182, 212, 0.15);' : ''}">
-        <i class="fa-solid ${it.icon}" style="color: #0891b2; font-size: 16px; width: 20px; text-align: center;"></i>
-        <div style="flex: 1;">
-          <div style="font-weight: 600; font-size: 13px; color: #0f172a;">${it.title}</div>
-          <div style="font-size: 11px; color: #64748b;">${it.subtitle}</div>
+           data-index="${idx}">
+        <div class="turbo-item-icon">
+          <i class="fa-solid ${it.icon}"></i>
         </div>
+        <div class="turbo-item-main">
+          <div class="turbo-item-title-row">
+            <span class="turbo-item-title">${it.title}</span>
+            ${it.badge ? `<span class="turbo-item-badge ${it.badgeClass || ''}">${it.badge}</span>` : ''}
+          </div>
+          <div class="turbo-item-meta">${it.subtitle}</div>
+        </div>
+        ${it.quickActions && it.quickActions.length ? `
+          <div class="turbo-item-actions" onclick="event.stopPropagation()">
+            ${it.quickActions.map(qa => `
+              <button type="button" class="turbo-action-btn" onclick="${qa.action}; window.closeCommandPalette();">
+                <i class="fa-solid ${qa.icon}"></i> ${qa.label}
+              </button>
+            `).join('')}
+          </div>
+        ` : ''}
       </div>
     `).join('');
   };
@@ -4011,7 +4281,7 @@ function bindBillingFormInputs() {
   function scrollToSelectedCmdItem() {
     const listEl = document.getElementById("cmd-palette-results");
     if (!listEl) return;
-    const selected = listEl.querySelector(".cmd-palette-item.selected");
+    const selected = listEl.querySelector(".turbo-result-item.selected");
     if (selected) selected.scrollIntoView({ block: 'nearest' });
   }
 
@@ -4039,6 +4309,11 @@ function bindBillingFormInputs() {
             window.renderCommandPalette(cmdInput.value);
             scrollToSelectedCmdItem();
           }
+        } else if (e.key === "Tab") {
+          e.preventDefault();
+          const filters = ['all', 'parties', 'products', 'invoices', 'actions'];
+          const nextIdx = (filters.indexOf(currentTurboFilter) + 1) % filters.length;
+          window.setTurboFilter(filters[nextIdx]);
         } else if (e.key === "Enter") {
           e.preventDefault();
           window.executeCommandPaletteItem(cmdPaletteSelectedIndex);
@@ -4052,12 +4327,26 @@ function bindBillingFormInputs() {
       // 1. Escape closes Command Palette, shortcuts modal, and popovers
       if (e.key === "Escape") {
         if (typeof window.closeCommandPalette === 'function') window.closeCommandPalette();
+        if (typeof window.closeDynamicUpiModal === 'function') window.closeDynamicUpiModal();
         if (typeof window.closeSmartProductPopover === 'function') window.closeSmartProductPopover();
         if (typeof window.closeKeyboardShortcutsModal === 'function') window.closeKeyboardShortcutsModal();
         return;
       }
 
-      // 2. Quick Inward Restock: F2
+      // 2. F4 or Ctrl+Enter: FAST 1-KEY POS SAVE & AUTO-DISPATCH
+      if (e.key === "F4" || ((e.ctrlKey || e.metaKey) && e.key === "Enter")) {
+        const billingView = document.getElementById("view-billing");
+        if (billingView && !billingView.classList.contains("hidden")) {
+          e.preventDefault();
+          const saveBtn = document.getElementById("btn-save-generate-invoice");
+          if (saveBtn) {
+            if (typeof saveAndGenerateInvoiceOnly === 'function') saveAndGenerateInvoiceOnly(saveBtn);
+          }
+          return;
+        }
+      }
+
+      // 3. Quick Inward Restock: F2
       if (e.key === "F2") {
         e.preventDefault();
         if (typeof window.triggerQuickInwardFromBilling === 'function') {
@@ -4066,8 +4355,8 @@ function bindBillingFormInputs() {
         return;
       }
 
-      // 3. Command Palette: Ctrl+K or Cmd+K
-      if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
+      // 4. Command Palette: Ctrl+K or Cmd+K or Alt+K
+      if (((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) || (e.altKey && (e.key === "k" || e.key === "K"))) {
         e.preventDefault();
         const modal = document.getElementById("global-command-palette-modal");
         if (modal && !modal.classList.contains("hidden")) {
@@ -4078,7 +4367,17 @@ function bindBillingFormInputs() {
         return;
       }
 
-      // 3. Navigation shortcuts: Alt+N, Alt+D, Alt+H, Alt+P, Alt+R, Alt+S, Alt+C
+      // 5. Navigation shortcuts: Alt+N, Alt+D, Alt+H, Alt+P, Alt+R, Alt+S, Alt+C, Alt+W
+      if (e.altKey && (e.key === "w" || e.key === "W")) {
+        e.preventDefault();
+        const qtyInput = elements.billItemQty || document.getElementById("bill-item-qty");
+        if (qtyInput) {
+          qtyInput.focus();
+          qtyInput.select();
+        }
+        return;
+      }
+
       if (e.altKey && (e.key === "n" || e.key === "N")) {
         e.preventDefault();
         switchTab("billing");
@@ -4216,8 +4515,25 @@ function bindBillingFormInputs() {
     const warningText = document.getElementById("qty-warning-text");
     const maxCountSpan = document.getElementById("qty-max-count");
     const addBtn = document.querySelector(".btn-add-row");
+    const multiLotPill = document.getElementById("multi-lot-summary-pill");
+    const multiLotText = document.getElementById("multi-lot-summary-text");
 
     if (!qtyInput) return;
+
+    // Evaluate Multi-Lot summation if typed (e.g. 25.5 + 30.2 + 28.4 or 5*20)
+    const rawQtyStr = String(qtyInput.value || "").trim();
+    const parsedLot = (typeof window.parseMultiLotWeight === 'function') 
+      ? window.parseMultiLotWeight(rawQtyStr) 
+      : { total: parseFloat(rawQtyStr) || 1, count: 1, isMulti: false, avg: parseFloat(rawQtyStr) || 1 };
+
+    if (multiLotPill && multiLotText) {
+      if (parsedLot.isMulti) {
+        multiLotPill.classList.remove("hidden");
+        multiLotText.innerHTML = `<strong>∑ ${parsedLot.count} Lots:</strong> ${parsedLot.total.toFixed(2)} Kg <span style="opacity: 0.8; font-size: 10px;">(Avg ${parsedLot.avg.toFixed(2)} Kg)</span>`;
+      } else {
+        multiLotPill.classList.add("hidden");
+      }
+    }
 
     const prodId = elements.billItemSelect ? elements.billItemSelect.value : "";
     let prod = productsDb.find(p => p && p.id === prodId);
@@ -4263,7 +4579,7 @@ function bindBillingFormInputs() {
       .reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0);
 
     const remainingCanAdd = Math.max(0, effectiveAvailable - currentInCart);
-    const requestedQty = parseFloat(qtyInput.value) || 0;
+    const requestedQty = parsedLot.total || parseFloat(qtyInput.value) || 0;
 
     if (effectiveAvailable <= 0 || remainingCanAdd <= 0) {
       qtyInput.classList.add("qty-input-warning");
@@ -5827,9 +6143,11 @@ window.addBillingItemRow = function() {
       return false;
     }
 
-    const hsn = (elements.billItemHsn ? elements.billItemHsn.value.trim() : "") || (prod ? (prod.hsn || "") : "");
-    const qtyVal = parseFloat(elements.billItemQty ? elements.billItemQty.value : "1");
-    const qty = (isNaN(qtyVal) || qtyVal <= 0) ? 1 : qtyVal;
+    const rawQty = elements.billItemQty ? elements.billItemQty.value : "1";
+    const parsedLot = (typeof window.parseMultiLotWeight === 'function') 
+      ? window.parseMultiLotWeight(rawQty) 
+      : { total: parseFloat(rawQty) || 1, count: 1, isMulti: false };
+    const qty = parsedLot.total > 0 ? parsedLot.total : 1;
     const unit = (elements.billItemUnit ? elements.billItemUnit.value.trim() : "") || (prod ? (prod.unit || "Bucket") : "Bucket");
     const gstRate = parseFloat(elements.billItemGstRate ? elements.billItemGstRate.value : "0") || (prod ? (parseFloat(prod.gstRate) || 0) : 0);
     const discount = parseFloat(elements.billItemDiscount ? elements.billItemDiscount.value : "0") || 0;
@@ -15289,355 +15607,116 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// // ============================================================================
+// TURBO SPEED & MULTI-LOT WEIGHT SUMMATION ENGINE (Fish Lots / Basket Calculator)
 // ============================================================================
-// TELUGU VOICE AI ASSISTANT (తెలుగు వాయిస్ అసిస్టెంట్ & స్పీచ్ ఇంజిన్)
-// ============================================================================
-(function() {
-  let recognition = null;
-  let isListening = false;
-  let currentLang = 'te-IN'; // Default Telugu
-  let lastSpokenText = '';
-  let speechSynth = window.speechSynthesis || null;
-
-  // Initialize Web Speech API Recognition
-  function initSpeechRecognition() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      console.warn("Speech Recognition API is not supported in this browser.");
-      return null;
-    }
-    const rec = new SpeechRecognition();
-    rec.continuous = false;
-    rec.interimResults = true;
-    rec.lang = currentLang;
-
-    rec.onstart = function() {
-      isListening = true;
-      updateVoiceUIState('listening');
-    };
-
-    rec.onresult = function(event) {
-      let interim = '';
-      let final = '';
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          final += event.results[i][0].transcript;
-        } else {
-          interim += event.results[i][0].transcript;
-        }
-      }
-      const transcriptEl = document.getElementById("voice-user-transcript");
-      if (transcriptEl) {
-        transcriptEl.textContent = final || interim || "...";
-      }
-      if (final) {
-        rec.stop();
-        window.executeVoiceCommandQuery(final.trim());
-      }
-    };
-
-    rec.onerror = function(event) {
-      console.warn("Voice Recognition error:", event.error);
-      isListening = false;
-      updateVoiceUIState('idle');
-      const badgeText = document.getElementById("voice-status-text");
-      if (badgeText) {
-        badgeText.textContent = event.error === 'no-speech' 
-          ? "మాట వినపడలేదు, మళ్ళీ ప్రయత్నించండి (No speech detected)" 
-          : "మైక్రోఫోన్ లోపం (" + event.error + ")";
-      }
-    };
-
-    rec.onend = function() {
-      isListening = false;
-      updateVoiceUIState('idle');
-    };
-
-    return rec;
-  }
-
-  function updateVoiceUIState(state) {
-    const visualizer = document.getElementById("voice-wave-visualizer");
-    const badge = document.getElementById("voice-status-badge");
-    const badgeText = document.getElementById("voice-status-text");
-    const mainMicBtn = document.getElementById("voice-main-mic-btn");
-    const navPill = document.getElementById("live-telugu-voice-pill");
-
-    if (state === 'listening') {
-      if (visualizer) visualizer.classList.add("active");
-      if (badge) {
-        badge.className = "voice-status-badge listening";
-      }
-      if (badgeText) badgeText.textContent = "వింటున్నాను... మాట్లాడండి (Listening... Speak now)";
-      if (mainMicBtn) mainMicBtn.classList.add("listening");
-      if (navPill) navPill.classList.add("listening");
-    } else if (state === 'speaking') {
-      if (visualizer) visualizer.classList.add("active");
-      if (badge) {
-        badge.className = "voice-status-badge speaking";
-      }
-      if (badgeText) badgeText.textContent = "సమాధానం చెబుతున్నాను (Speaking response...)";
-      if (mainMicBtn) mainMicBtn.classList.remove("listening");
-      if (navPill) navPill.classList.remove("listening");
-    } else {
-      if (visualizer) visualizer.classList.remove("active");
-      if (badge) {
-        badge.className = "voice-status-badge";
-      }
-      if (badgeText) badgeText.textContent = "మైక్ బటన్ నొక్కి మాట్లాడండి (Tap Mic to Speak)";
-      if (mainMicBtn) mainMicBtn.classList.remove("listening");
-      if (navPill) navPill.classList.remove("listening");
+window.parseMultiLotWeight = function(str) {
+  if (!str) return { total: 1, count: 1, isMulti: false, avg: 1 };
+  const cleaned = String(str).trim();
+  
+  // Support multiplier expressions like "10 * 20" or "5 x 25.5"
+  if (cleaned.includes('*') || cleaned.toLowerCase().includes('x')) {
+    const parts = cleaned.replace(/x/gi, '*').split('*').map(x => parseFloat(x.trim())).filter(x => !isNaN(x));
+    if (parts.length === 2 && parts[0] > 0 && parts[1] > 0) {
+      const total = parts[0] * parts[1];
+      return { total: Math.round(total * 100) / 100, count: Math.round(parts[0]), isMulti: true, avg: parts[1] };
     }
   }
 
-  window.toggleTeluguVoiceAssistant = function() {
-    const modal = document.getElementById("telugu-voice-modal");
-    if (!modal) return;
-    const isHidden = modal.classList.contains("hidden");
-    if (isHidden) {
-      modal.classList.remove("hidden");
-      if (typeof playSubtleClickAudio === "function") playSubtleClickAudio();
-      window.toggleVoiceListening(true);
-    } else {
-      modal.classList.add("hidden");
-      if (recognition && isListening) {
-        try { recognition.stop(); } catch (e) {}
-      }
-      if (speechSynth && speechSynth.speaking) {
-        try { speechSynth.cancel(); } catch (e) {}
-      }
+  // Support space or plus separated multi-lot numbers e.g. "25.5 + 30.2 + 28.4" or "25.5 30.2 28.4"
+  if (cleaned.includes('+') || (cleaned.includes(' ') && !cleaned.includes('-'))) {
+    const parts = cleaned.split(/[\s+]+/).map(x => parseFloat(x.trim())).filter(x => !isNaN(x) && x > 0);
+    if (parts.length > 1) {
+      const total = parts.reduce((acc, v) => acc + v, 0);
+      const avg = total / parts.length;
+      return { total: Math.round(total * 100) / 100, count: parts.length, isMulti: true, avg: Math.round(avg * 100) / 100 };
     }
-  };
+  }
 
-  window.setVoiceAssistantLang = function(lang) {
-    currentLang = lang || 'te-IN';
-    const btnTe = document.getElementById("btn-lang-te");
-    const btnEn = document.getElementById("btn-lang-en");
-    if (btnTe) btnTe.classList.toggle("active", currentLang === 'te-IN');
-    if (btnEn) btnEn.classList.toggle("active", currentLang === 'en-IN');
-    if (recognition) {
-      recognition.lang = currentLang;
-    }
-    const welcome = currentLang === 'te-IN'
-      ? "భాష తెలుగులోకి మార్చబడింది. మీ ప్రశ్నను అడగండి."
-      : "Language switched to English. Please ask your query.";
-    window.speakTeluguResponse(welcome);
-  };
+  const val = parseFloat(cleaned) || 1;
+  return { total: Math.max(0.01, val), count: 1, isMulti: false, avg: val };
+};
 
-  window.toggleVoiceListening = function(forceStart = false) {
-    if (!recognition) {
-      recognition = initSpeechRecognition();
-    }
-    if (!recognition) {
-      alert("మీ బ్రౌజర్‌లో వాయిస్ రికగ్నిషన్ సపోర్ట్ లేదు. దయచేసి Chrome లేదా Edge బ్రౌజర్ ఉపయోగించండి.");
-      return;
-    }
+// ============================================================================
+// DYNAMIC UPI SMART QR CODE & INSTANT WHATSAPP PAY ENGINE
+// ============================================================================
+let currentActiveUpiInvoice = null;
 
-    if (isListening && !forceStart) {
-      try { recognition.stop(); } catch (e) {}
-      isListening = false;
-      updateVoiceUIState('idle');
-    } else {
-      if (speechSynth && speechSynth.speaking) {
-        try { speechSynth.cancel(); } catch (e) {}
-      }
-      recognition.lang = currentLang;
-      try {
-        recognition.start();
-      } catch (err) {
-        console.warn("Recognition start note:", err.message);
-      }
-    }
-  };
+window.showDynamicUpiQr = function(invOrId) {
+  let inv = null;
+  if (typeof invOrId === 'object' && invOrId !== null) {
+    inv = invOrId;
+  } else if (invOrId) {
+    const list = window.invoicesHistory || invoicesDb || [];
+    inv = list.find(x => x && (x.id === invOrId || x.invoiceNo === invOrId));
+  }
+  if (!inv) {
+    // Check active billing form
+    inv = {
+      invoiceNo: (elements.billInvoiceNo?.value) || 'INV-DRAFT',
+      customerName: (elements.billBuyerName?.value) || 'Customer',
+      phone: (elements.billBuyerPhone?.value) || '',
+      grandTotal: (currentInvoice?.grandTotal) || parseFloat(document.getElementById('sum-grand-total')?.textContent?.replace(/[^\d.]/g, '')) || 0
+    };
+  }
 
-  window.speakTeluguResponse = function(text) {
-    lastSpokenText = text;
-    const responseEl = document.getElementById("voice-ai-response");
-    if (responseEl) {
-      responseEl.textContent = text;
-    }
+  currentActiveUpiInvoice = inv;
+  const d = inv.details || inv;
+  const invNo = inv.invoiceNo || d.invoiceNo || 'INV';
+  const total = Number(d.balanceDue !== undefined && d.balanceDue > 0 ? d.balanceDue : (d.grandTotal || d.total || inv.grandTotal || 0));
+  const merchantName = globalSettings?.company?.name || 'Aaryan Aqua Needs';
+  const upiId = globalSettings?.bank?.upiId || 'aaryan@upi';
 
-    if (!speechSynth) return;
-    try {
-      speechSynth.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.95;
-      utterance.pitch = 1.0;
+  const modal = document.getElementById("dynamic-upi-qr-modal");
+  const amtText = document.getElementById("dynamic-upi-amount-text");
+  const nameText = document.getElementById("dynamic-upi-merchant-name");
+  const upiIdText = document.getElementById("dynamic-upi-id-text");
+  const invNoText = document.getElementById("dynamic-upi-inv-no");
+  const qrImg = document.getElementById("dynamic-upi-qr-img");
 
-      const voices = speechSynth.getVoices ? speechSynth.getVoices() : [];
-      let matchedVoice = null;
-      if (currentLang === 'te-IN') {
-        matchedVoice = voices.find(v => v.lang === 'te-IN' || v.lang === 'te_IN' || (v.name && v.name.toLowerCase().includes('telugu')));
-      }
-      if (!matchedVoice) {
-        matchedVoice = voices.find(v => v.lang === 'en-IN' || (v.name && v.name.toLowerCase().includes('india')));
-      }
-      if (matchedVoice) {
-        utterance.voice = matchedVoice;
-      }
-      utterance.lang = currentLang === 'te-IN' ? 'te-IN' : 'en-IN';
+  if (amtText) amtText.textContent = `₹ ${total.toFixed(2)}`;
+  if (nameText) nameText.textContent = merchantName;
+  if (upiIdText) upiIdText.textContent = upiId;
+  if (invNoText) invNoText.textContent = `#${invNo}`;
 
-      utterance.onstart = function() {
-        updateVoiceUIState('speaking');
-      };
-      utterance.onend = function() {
-        updateVoiceUIState('idle');
-      };
-      utterance.onerror = function() {
-        updateVoiceUIState('idle');
-      };
+  const upiUri = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(merchantName)}&am=${total.toFixed(2)}&cu=INR&tn=${encodeURIComponent('Invoice_' + invNo)}`;
 
-      speechSynth.speak(utterance);
-    } catch (e) {
-      console.warn("Speech synthesis error:", e);
-      updateVoiceUIState('idle');
-    }
-  };
+  if (qrImg) {
+    qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(upiUri)}`;
+  }
 
-  window.replayLastVoiceResponse = function() {
-    if (lastSpokenText) {
-      window.speakTeluguResponse(lastSpokenText);
-    }
-  };
+  if (modal) {
+    modal.classList.remove("hidden");
+    modal.style.display = "flex";
+  }
+};
 
-  window.executeVoiceCommandQuery = function(query) {
-    if (!query) return;
-    const transcriptEl = document.getElementById("voice-user-transcript");
-    if (transcriptEl) {
-      transcriptEl.textContent = query;
-    }
+window.closeDynamicUpiModal = function() {
+  const modal = document.getElementById("dynamic-upi-qr-modal");
+  if (modal) {
+    modal.classList.add("hidden");
+    modal.style.display = "none";
+  }
+};
 
-    const q = query.toLowerCase().trim();
-    let responseText = "";
+window.shareDynamicUpiWhatsApp = function() {
+  if (!currentActiveUpiInvoice) return;
+  const d = currentActiveUpiInvoice.details || currentActiveUpiInvoice;
+  const buyer = d.buyer || currentActiveUpiInvoice.buyer || {};
+  const phone = buyer.phone || d.phone || currentActiveUpiInvoice.phone || '';
+  const total = Number(d.balanceDue !== undefined && d.balanceDue > 0 ? d.balanceDue : (d.grandTotal || d.total || currentActiveUpiInvoice.grandTotal || 0));
+  const invNo = currentActiveUpiInvoice.invoiceNo || d.invoiceNo || 'INV';
+  const upiId = globalSettings?.bank?.upiId || 'aaryan@upi';
+  const merchantName = globalSettings?.company?.name || 'Aaryan Aqua Needs';
+  
+  const upiUri = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(merchantName)}&am=${total.toFixed(2)}&cu=INR&tn=${encodeURIComponent('Invoice_' + invNo)}`;
+  const message = `*Aaryan Aqua Needs - Instant Payment Request*\n\n📄 *Invoice #:* ${invNo}\n💰 *Amount Due:* ₹ ${total.toFixed(2)}\n\n👉 *Pay directly via UPI / GooglePay / PhonePe / Paytm:*\n${upiUri}\n\nThank you for your business! 🐟`;
 
-    // 1. SALES TODAY / TODAY INVOICES
-    if (q.includes("సేల్స్") || q.includes("సేల్") || q.includes("ఈ రోజు") || q.includes("ఈరోజు") || q.includes("వ్యాపారం") || q.includes("కలెక్షన్") || q.includes("today") || q.includes("sales") || q.includes("collection")) {
-      const todayStr = new Date().toISOString().split('T')[0];
-      const invoices = (window.invoicesHistory || []);
-      const todayInvoices = invoices.filter(inv => {
-        const invDate = inv.date || (inv.details && inv.details.invoiceDate) || "";
-        return String(invDate).startsWith(todayStr);
-      });
-
-      let totalSales = 0;
-      let totalPaid = 0;
-      todayInvoices.forEach(inv => {
-        const d = inv.details || inv;
-        totalSales += Number(d.grandTotal || d.total || inv.grandTotal || 0);
-        totalPaid += Number(d.paidAmount || inv.paidAmount || 0);
-      });
-
-      if (currentLang === 'te-IN') {
-        if (todayInvoices.length === 0) {
-          responseText = `ఈ రోజు ఇంకా ఎలాంటి ఇన్వాయిస్‌లు నమోదు కాలేదు. కొత్త బిల్లు రాయడానికి సిద్ధంగా ఉన్నాను.`;
-        } else {
-          responseText = `ఈ రోజు మొత్తం ${todayInvoices.length} ఇన్వాయిస్‌లు నమోదయ్యాయి. మొత్తం వ్యాపారం ₹ ${Math.round(totalSales).toLocaleString('en-IN')} రూపాయలు. వసూలైన మొత్తం ₹ ${Math.round(totalPaid).toLocaleString('en-IN')} రూపాయలు.`;
-        }
-      } else {
-        responseText = `Today there are ${todayInvoices.length} invoices. Total sales amount is ₹ ${Math.round(totalSales).toLocaleString('en-IN')}, and collected amount is ₹ ${Math.round(totalPaid).toLocaleString('en-IN')}.`;
-      }
-    }
-    // 2. NEW BILL / CREATE INVOICE
-    else if (q.includes("కొత్త") || q.includes("బిల్లు") || q.includes("ఇన్వాయిస్ రాయి") || q.includes("బిల్") || q.includes("new bill") || q.includes("create bill") || q.includes("new invoice")) {
-      if (typeof switchTab === 'function') {
-        switchTab('billing');
-      }
-      setTimeout(() => {
-        const custInput = document.getElementById("customer-name");
-        if (custInput) custInput.focus();
-      }, 400);
-
-      if (currentLang === 'te-IN') {
-        responseText = `కొత్త బిల్లింగ్ ఫారమ్ తెరవబడింది. కస్టమర్ వివరాలు నమోదు చేయండి.`;
-      } else {
-        responseText = `New billing form is opened. Please enter customer details.`;
-      }
-    }
-    // 3. CUSTOMER BALANCE / OUTSTANDING
-    else if (q.includes("బ్యాలెన్స్") || q.includes("బకాయి") || q.includes("బాకీ") || q.includes("balance") || q.includes("outstanding") || q.includes("pending")) {
-      const invoices = (window.invoicesHistory || []);
-      let totalPending = 0;
-      let pendingCount = 0;
-      invoices.forEach(inv => {
-        const d = inv.details || inv;
-        const bal = Number(d.balanceDue || inv.balanceDue || 0);
-        if (bal > 0) {
-          totalPending += bal;
-          pendingCount++;
-        }
-      });
-
-      if (currentLang === 'te-IN') {
-        responseText = `మొత్తం ${pendingCount} బిల్లులకు గాను పెండింగ్ బ్యాలెన్స్ ₹ ${Math.round(totalPending).toLocaleString('en-IN')} రూపాయలు ఉంది.`;
-      } else {
-        responseText = `Total pending balance across ${pendingCount} bills is ₹ ${Math.round(totalPending).toLocaleString('en-IN')}.`;
-      }
-    }
-    // 4. STOCK / PRODUCTS
-    else if (q.includes("స్టాక్") || q.includes("ప్రొడక్ట్") || q.includes("రాలిమిన్") || q.includes("stock") || q.includes("product") || q.includes("inventory")) {
-      const products = window.products || window.allProducts || [];
-      if (typeof switchTab === 'function') {
-        switchTab('products');
-      }
-      if (currentLang === 'te-IN') {
-        responseText = `మొత్తం ${products.length} రకాల ఉత్పత్తులు అందుబాటులో ఉన్నాయి. స్టాక్ స్క్రీన్ తెరవబడింది.`;
-      } else {
-        responseText = `There are ${products.length} products available. Products catalog is opened.`;
-      }
-    }
-    // 5. WHATSAPP STATUS
-    else if (q.includes("వాట్సాప్") || q.includes("whatsapp") || q.includes("bot")) {
-      const statusPill = document.getElementById("live-whatsapp-pill");
-      const isConnected = statusPill && statusPill.classList.contains("connected");
-      if (currentLang === 'te-IN') {
-        responseText = isConnected
-          ? `వాట్సాప్ బాట్ విజయవంతంగా కనెక్ట్ అయి ఉంది. ఇన్వాయిస్ పిడిఎఫ్ లు ఆటోమేటిక్‌గా వెళ్తాయి.`
-          : `వాట్సాప్ బాట్ ఇంకా కనెక్ట్ కాలేదు. దయచేసి వాట్సాప్ బటన్ పై క్లిక్ చేసి క్యూఆర్ కోడ్ స్కాన్ చేయండి.`;
-      } else {
-        responseText = isConnected
-          ? `WhatsApp Bot is active and connected. PDF invoices will dispatch automatically.`
-          : `WhatsApp Bot is currently disconnected. Please click WhatsApp icon to link your device.`;
-      }
-    }
-    // 6. GENERAL SEARCH (Invoice # or Customer)
-    else {
-      const invoices = (window.invoicesHistory || []);
-      const numMatch = q.match(/\d+/);
-      if (numMatch) {
-        const searchedNum = numMatch[0].padStart(4, '0');
-        if (typeof switchTab === 'function') {
-          switchTab('history');
-        }
-        const searchInput = document.getElementById("invoice-search-input");
-        if (searchInput) {
-          searchInput.value = searchedNum;
-          searchInput.dispatchEvent(new Event('input'));
-        }
-        if (currentLang === 'te-IN') {
-          responseText = `ఇన్వాయిస్ నంబర్ ${searchedNum} కొరకు శోధించాను. వివరాలు స్క్రీన్‌పై ఉన్నాయి.`;
-        } else {
-          responseText = `Searched for invoice number ${searchedNum}. Details are shown on screen.`;
-        }
-      } else {
-        if (currentLang === 'te-IN') {
-          responseText = `మీరు "${query}" అని అడిగారు. సహాయం కొరకు "ఈ రోజు సేల్స్", "కొత్త బిల్లు", లేదా "స్టాక్ వివరాలు" అని అడగండి.`;
-        } else {
-          responseText = `You asked "${query}". You can ask "today sales", "new bill", or "stock details".`;
-        }
-      }
-    }
-
-    window.speakTeluguResponse(responseText);
-  };
-
-  // Keyboard shortcut: Alt+V toggles Telugu Voice Assistant
-  document.addEventListener('keydown', function(e) {
-    if (e.altKey && (e.key === 'v' || e.key === 'V')) {
-      e.preventDefault();
-      window.toggleTeluguVoiceAssistant();
-    }
-  });
-})();
-
-
-
+  if (typeof sendWhatsAppBotTextMessage === 'function' && phone) {
+    sendWhatsAppBotTextMessage(phone, message);
+    showFloatingToast(`📲 UPI Payment link dispatched to ${phone} via WhatsApp!`, 3000);
+    closeDynamicUpiModal();
+  } else {
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`, '_blank');
+  }
+};
