@@ -8163,3 +8163,327 @@ section.content-view.hidden {
   }
 }
 
+/* ============================================================================
+   TELUGU VOICE AI ASSISTANT (తెలుగు వాయిస్ అసిస్టెంట్) STYLES
+   ============================================================================ */
+.voice-ai-pill {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 5px 12px !important;
+  border-radius: 20px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  background: #fdf2f8 !important;
+  color: #be185d !important;
+  border: 1px solid #fbcfe8 !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+}
+
+.voice-ai-pill:hover {
+  background: #fce7f3 !important;
+  color: #9d174d !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(236, 72, 153, 0.25);
+}
+
+.voice-ai-pill.listening {
+  background: #ec4899 !important;
+  color: #ffffff !important;
+  border-color: #db2777 !important;
+  animation: voicePulse 1.5s infinite;
+}
+
+@keyframes voicePulse {
+  0% { box-shadow: 0 0 0 0 rgba(236, 72, 153, 0.6); }
+  70% { box-shadow: 0 0 0 10px rgba(236, 72, 153, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(236, 72, 153, 0); }
+}
+
+.telugu-voice-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  padding: 16px;
+  animation: fadeInVoice 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fadeInVoice {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.telugu-voice-card {
+  background: #ffffff;
+  border-radius: 20px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(236, 72, 153, 0.15);
+  width: 100%;
+  max-width: 520px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.telugu-voice-header {
+  background: linear-gradient(135deg, #be185d 0%, #ec4899 50%, #8b5cf6 100%);
+  color: #ffffff;
+  padding: 18px 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.telugu-voice-header h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #ffffff;
+}
+
+.telugu-voice-header .voice-sub {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.9;
+  display: block;
+}
+
+.telugu-voice-close-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: #ffffff;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.telugu-voice-close-btn:hover {
+  background: rgba(255, 255, 255, 0.35);
+  transform: rotate(90deg);
+}
+
+.telugu-voice-body {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.voice-wave-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 48px;
+  margin: 8px 0;
+}
+
+.voice-wave-bar {
+  width: 6px;
+  height: 12px;
+  background: #cbd5e1;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.voice-wave-container.active .voice-wave-bar {
+  background: linear-gradient(180deg, #ec4899 0%, #be185d 100%);
+  animation: waveMotion 1.2s ease-in-out infinite alternate;
+}
+
+.voice-wave-container.active .voice-wave-bar:nth-child(1) { animation-delay: 0.1s; }
+.voice-wave-container.active .voice-wave-bar:nth-child(2) { animation-delay: 0.3s; }
+.voice-wave-container.active .voice-wave-bar:nth-child(3) { animation-delay: 0.5s; }
+.voice-wave-container.active .voice-wave-bar:nth-child(4) { animation-delay: 0.2s; }
+.voice-wave-container.active .voice-wave-bar:nth-child(5) { animation-delay: 0.4s; }
+
+@keyframes waveMotion {
+  0% { height: 10px; }
+  50% { height: 42px; }
+  100% { height: 16px; }
+}
+
+.voice-status-badge {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: 20px;
+  background: #f1f5f9;
+  color: #475569;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.voice-status-badge.listening {
+  background: #fdf2f8;
+  color: #be185d;
+  border: 1px solid #fbcfe8;
+}
+
+.voice-status-badge.speaking {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.voice-transcript-wrapper {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.voice-bubble {
+  padding: 14px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  position: relative;
+}
+
+.voice-user-bubble {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #1e293b;
+}
+
+.voice-user-bubble .bubble-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.voice-ai-bubble {
+  background: #fdf2f8;
+  border: 1px solid #fbcfe8;
+  color: #831843;
+}
+
+.voice-ai-bubble .bubble-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #db2777;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.quick-voice-prompts-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+  width: 100%;
+  text-align: left;
+  margin-top: 4px;
+}
+
+.quick-voice-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+
+.voice-prompt-chip {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.voice-prompt-chip:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+  border-color: #cbd5e1;
+  transform: translateY(-1px);
+}
+
+.telugu-voice-footer {
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.voice-action-btn-main {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ec4899 0%, #be185d 100%);
+  color: #ffffff;
+  border: none;
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(236, 72, 153, 0.4);
+  transition: all 0.2s;
+}
+
+.voice-action-btn-main:hover {
+  transform: scale(1.08);
+}
+
+.voice-action-btn-main.listening {
+  background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.4);
+  animation: voicePulse 1.2s infinite;
+}
+
+.voice-lang-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.voice-lang-btn {
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.voice-lang-btn.active {
+  background: #ec4899;
+  color: #ffffff;
+  border-color: #ec4899;
+}
+
+

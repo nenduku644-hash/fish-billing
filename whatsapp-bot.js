@@ -584,10 +584,11 @@ async function safeClientSendPdf(chatId, filename, pdfBase64, caption = '') {
   if (!client) throw new Error('WhatsApp bot client is not initialized');
   const cleanB64 = String(pdfBase64).replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
   const docCaption = sanitizeCaption(caption || `📄 ${filename || 'Tax Invoice'} - Aaryan Aqua Needs`);
+  const pdfName = String(filename || 'Tax_Invoice.pdf').endsWith('.pdf') ? filename : `${filename || 'Tax_Invoice'}.pdf`;
 
-  console.log(`📤 Dispatching PDF document "${filename || 'Invoice.pdf'}" to ${chatId}...`);
+  console.log(`📤 Dispatching PDF document "${pdfName}" to ${chatId}...`);
 
-  // Direct evaluation using WhatsApp Web's own WWebJS.sendMessage with properly formatted options.media
+  // Direct evaluation using WhatsApp Web's verified native media pipeline
   if (client.pupPage && !client.pupPage.isClosed()) {
     try {
       const result = await client.pupPage.evaluate(async (targetChatId, b64, fname, cap) => {
@@ -596,41 +597,98 @@ async function safeClientSendPdf(chatId, filename, pdfBase64, caption = '') {
           if (!chat) throw new Error('Chat not found for ' + targetChatId);
           const actualChat = (chat && chat.chat) ? chat.chat : chat;
 
-          const mediaData = {
+          const mediaInfo = {
             mimetype: 'application/pdf',
             data: b64,
-            filename: fname || 'Invoice.pdf'
+            filename: fname || 'Tax_Invoice.pdf'
           };
 
-          const options = {
-            media: mediaData,
+          const file = window.WWebJS.mediaInfoToFile(mediaInfo);
+          const OpaqueData = window.require('WAWebMediaOpaqueData');
+          const opaqueData = await OpaqueData.createFromData(file, mediaInfo.mimetype);
+          const mediaPrep = window.require('WAWebPrepRawMedia').prepRawMedia(opaqueData, { asDocument: true });
+          const mediaData = await mediaPrep.waitForPrep();
+          const mediaObject = window.require('WAWebMediaStorage').getOrCreateMediaObject(mediaData.filehash);
+          const mediaType = window.require('WAWebMmsMediaTypes').msgToMediaType({ type: mediaData.type });
+          const dataToUpload = { mimetype: mediaData.mimetype, mediaObject, mediaType };
+          const { uploadMedia } = window.require('WAWebMediaMmsV4Upload');
+          const uploadedMedia = await uploadMedia(dataToUpload);
+          const mediaEntry = uploadedMedia.mediaEntry;
+          if (!mediaEntry) throw new Error('MMS media upload failed: mediaEntry is null');
+
+          mediaData.set({
+            clientUrl: mediaEntry.deprecatedMms3Url || mediaEntry.mmsUrl || mediaEntry.directPath,
+            deprecatedMms3Url: mediaEntry.deprecatedMms3Url,
+            directPath: mediaEntry.directPath,
+            mediaKey: mediaEntry.mediaKey,
+            mediaKeyTimestamp: mediaEntry.mediaKeyTimestamp,
+            filehash: mediaObject.filehash,
+            encFilehash: mediaEntry.encFilehash,
+            uploadhash: mediaObject.filehash,
+            size: mediaObject.size,
+            filename: fname || 'Tax_Invoice.pdf'
+          });
+
+          const { getMaybeMeLidUser, getMaybeMePnUser } = window.require('WAWebUserPrefsMeUser');
+          const lidUser = getMaybeMeLidUser();
+          const meUser = getMaybeMePnUser();
+          const newId = await window.require('WAWebMsgKey').newId();
+          let from = actualChat.id.isLid() ? lidUser : meUser;
+
+          const newMsgKey = new (window.require('WAWebMsgKey'))({
+            from: from,
+            to: actualChat.id,
+            id: newId,
+            selfDir: 'out',
+          });
+
+          const ephemeralFields = window.require('WAWebGetEphemeralFieldsMsgActionsUtils').getEphemeralFields(actualChat);
+          const mediaJson = mediaData.toJSON ? mediaData.toJSON() : mediaData;
+
+          const message = {
+            id: newMsgKey,
+            ack: 0,
             caption: cap || '',
-            sendMediaAsDocument: true,
-            waitUntilMsgSent: true
+            filename: fname || 'Tax_Invoice.pdf',
+            from: from,
+            to: actualChat.id,
+            local: true,
+            self: 'out',
+            t: parseInt(new Date().getTime() / 1000),
+            isNewMsg: true,
+            type: 'document',
+            ...ephemeralFields,
+            ...mediaJson,
           };
+          delete message.body;
 
-          const msg = await window.WWebJS.sendMessage(actualChat, cap || '', options);
-          return { ok: true, id: msg?.id?._serialized || 'sent' };
+          const [msgPromise, sendMsgResultPromise] = window.require('WAWebSendMsgChatAction').addAndSendMsgToChat(actualChat, message);
+          const msg = await msgPromise;
+          const sendRes = await sendMsgResultPromise;
+          if (sendRes && sendRes.messageSendResult && sendRes.messageSendResult !== 'OK') {
+            throw new Error('Message send result: ' + sendRes.messageSendResult);
+          }
+          return { ok: true, id: msg?.id?._serialized || newMsgKey._serialized };
         } catch (innerErr) {
           return { ok: false, error: innerErr?.message || String(innerErr) };
         }
-      }, chatId, cleanB64, filename, docCaption);
+      }, chatId, cleanB64, pdfName, docCaption);
 
       if (result && result.ok) {
-        console.log(`✅ PDF document "${filename || 'Invoice.pdf'}" successfully delivered to ${chatId}!`);
+        console.log(`✅ PDF document "${pdfName}" successfully delivered to ${chatId}!`);
         return result;
       }
       if (result && result.error) {
-        console.warn('WWebJS.sendMessage direct note:', result.error, 'Trying MessageMedia fallback...');
+        console.warn('Native PDF dispatch note:', result.error, 'Trying fallback...');
       }
     } catch (evalErr) {
-      console.warn('Puppeteer evaluate note:', evalErr.message, 'Trying MessageMedia fallback...');
+      console.warn('Puppeteer evaluate note:', evalErr.message, 'Trying fallback...');
     }
   }
 
   // Fallback: Official MessageMedia document sending via client.sendMessage
   try {
-    const media = new MessageMedia('application/pdf', cleanB64, filename || 'Invoice.pdf');
+    const media = new MessageMedia('application/pdf', cleanB64, pdfName);
     const result = await safeClientSendMessage(chatId, media, {
       caption: docCaption,
       sendMediaAsDocument: true
@@ -989,6 +1047,68 @@ app.post('/api/whatsapp/send-invoice', async (req, res) => {
 
 app.get('/api/whatsapp/activity', (req, res) => {
   res.json(activityLogs);
+});
+
+app.get('/api/whatsapp/debug-inspect', async (req, res) => {
+  try {
+    if (!client || !client.pupPage) return res.json({ error: 'No client or pupPage' });
+    const targetPhone = req.query.phone || '918367047947';
+    const data = await client.pupPage.evaluate(async (targetPhone) => {
+      try {
+        const chats = window.require('WAWebCollections').Chat.getModelsArray();
+        const chatList = chats.map(c => ({
+          id: c.id?._serialized,
+          name: c.name || c.formattedTitle,
+          isUser: c.id?.isUser ? c.id.isUser() : false,
+          msgsCount: c.msgs?.length || 0
+        }));
+
+        const meWid = window.require('WAWebUserPrefsWid').getMaybeMeUser();
+        const meUser = meWid?._serialized;
+
+        // Find self chat or chat matching phone
+        const matchingChats = chats.filter(c => c.id?._serialized.includes(targetPhone) || (meUser && c.id?._serialized === meUser));
+        let msgs = [];
+        let matchedId = null;
+        if (matchingChats.length > 0) {
+          const chat = matchingChats[0];
+          matchedId = chat.id?._serialized;
+          const msgModels = (chat.msgs && chat.msgs.getModelsArray) ? chat.msgs.getModelsArray() : [];
+          msgs = msgModels.slice(-10).map(m => ({
+            id: m.id?._serialized,
+            type: m.type,
+            subtype: m.subtype,
+            body: m.body ? String(m.body).substring(0, 150) : '',
+            caption: m.caption ? String(m.caption).substring(0, 150) : '',
+            mimetype: m.mimetype,
+            filename: m.filename,
+            isMedia: m.isMedia,
+            ack: m.ack,
+            fromMe: m.id?.fromMe
+          }));
+        }
+
+        return { meUser, chatList: chatList.slice(0, 15), matchedId, msgs };
+      } catch (innerErr) {
+        return { ok: false, error: innerErr.message };
+      }
+    }, targetPhone);
+
+    res.json({ ok: true, data });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/whatsapp/eval', express.json(), async (req, res) => {
+  try {
+    if (!client || !client.pupPage) return res.status(500).json({ error: 'No pupPage' });
+    const fn = new Function('client', req.body.code);
+    const result = await client.pupPage.evaluate(fn);
+    res.json({ ok: true, result });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // ============================================================================

@@ -69,7 +69,7 @@
       } catch (e) {}
     }
     // Build Version Enforcement: Clears stale caches when new build is deployed
-    window.__APP_BUILD_VERSION__ = "v405_whatsapp_pdf_guaranteed";
+    window.__APP_BUILD_VERSION__ = "v406_telugu_ai_whatsapp_pdf";
     try {
       const storedBuild = localStorage.getItem("aaryan_app_build_version");
       if (storedBuild !== window.__APP_BUILD_VERSION__) {
@@ -81,8 +81,8 @@
     } catch (e) {}
   </script>
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="index.css?v=405_whatsapp_pdf_guaranteed">
-  <script src="invoice_utils_v5.js?v=405_whatsapp_pdf_guaranteed"></script>
+  <link rel="stylesheet" href="index.css?v=406_telugu_ai_whatsapp_pdf">
+  <script src="invoice_utils_v5.js?v=406_telugu_ai_whatsapp_pdf"></script>
 </head>
 <body>
   <!-- HIGH-END LOGIN / LOCK SCREEN OVERLAY (Enforced by default for security) -->
@@ -235,6 +235,10 @@
             </div>
           </div>
           <div class="header-tools-group">
+            <div id="live-telugu-voice-pill" class="voice-ai-pill cursor-pointer" onclick="toggleTeluguVoiceAssistant()" title="తెలుగు వాయిస్ అసిస్టెంట్ (Telugu Voice AI Assistant - Alt+V)">
+              <i class="fa-solid fa-microphone-lines" id="voice-ai-icon" style="color: #ec4899;"></i>
+              <span id="voice-ai-pill-text">తెలుగు AI <kbd>Alt+V</kbd></span>
+            </div>
             <div id="live-data-share-pill" class="data-share-pill cursor-pointer" onclick="openDataSharingModal()" title="Advanced Data Sharing & P2P Quick Sync">
               <i class="fa-solid fa-share-nodes" style="color: #0284c7;"></i>
               <span id="data-share-pill-text">Share</span>
@@ -4142,6 +4146,84 @@
     </div>
   </div>
 
+  <!-- TELUGU VOICE AI ASSISTANT MODAL (తెలుగు వాయిస్ అసిస్టెంట్) -->
+  <div id="telugu-voice-modal" class="telugu-voice-modal hidden no-print" onclick="if(event.target === this) toggleTeluguVoiceAssistant()">
+    <div class="telugu-voice-card" role="dialog" aria-label="Telugu Voice Assistant">
+      <div class="telugu-voice-header">
+        <div>
+          <h3><i class="fa-solid fa-microphone-lines"></i> తెలుగు వాయిస్ అసిస్టెంట్</h3>
+          <span class="voice-sub">Aaryan Aqua Intelligent Voice AI • Telugu &amp; English</span>
+        </div>
+        <button type="button" class="telugu-voice-close-btn" onclick="toggleTeluguVoiceAssistant()" aria-label="Close Assistant">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="telugu-voice-body">
+        <div id="voice-wave-visualizer" class="voice-wave-container">
+          <div class="voice-wave-bar"></div>
+          <div class="voice-wave-bar"></div>
+          <div class="voice-wave-bar"></div>
+          <div class="voice-wave-bar"></div>
+          <div class="voice-wave-bar"></div>
+        </div>
+
+        <div id="voice-status-badge" class="voice-status-badge">
+          <i class="fa-solid fa-microphone"></i> <span id="voice-status-text">మైక్ బటన్ నొక్కి మాట్లాడండి (Tap Mic to Speak)</span>
+        </div>
+
+        <div class="voice-transcript-wrapper">
+          <div class="voice-bubble voice-user-bubble">
+            <div class="bubble-label"><i class="fa-solid fa-user"></i> మీరు అడిగింది (Your Query)</div>
+            <div id="voice-user-transcript">ఏదైనా అడగండి... (e.g. "ఈ రోజు సేల్స్ ఎంత?", "కొత్త బిల్లు రాయి")</div>
+          </div>
+
+          <div class="voice-bubble voice-ai-bubble">
+            <div class="bubble-label"><i class="fa-solid fa-robot"></i> అసిస్టెంట్ సమాధానం (AI Response)</div>
+            <div id="voice-ai-response">నమస్కారం! నేను మీ ఆర్యన్ ఆక్వా వాయిస్ అసిస్టెంట్‌ని. మాట్లాడటానికి క్రింది మైక్ బటన్ నొక్కండి.</div>
+          </div>
+        </div>
+
+        <div class="quick-voice-prompts-title">
+          <i class="fa-solid fa-bolt text-pink"></i> త్వరిత ఆదేశాలు (Quick Commands):
+        </div>
+        <div class="quick-voice-prompts">
+          <button type="button" class="voice-prompt-chip" onclick="executeVoiceCommandQuery('ఈ రోజు సేల్స్ ఎంత')">
+            <i class="fa-solid fa-chart-line text-cyan"></i> ఈ రోజు సేల్స్
+          </button>
+          <button type="button" class="voice-prompt-chip" onclick="executeVoiceCommandQuery('కొత్త ఇన్వాయిస్ రాయి')">
+            <i class="fa-solid fa-file-invoice-dollar text-emerald"></i> కొత్త బిల్లు
+          </button>
+          <button type="button" class="voice-prompt-chip" onclick="executeVoiceCommandQuery('కస్టమర్ల బ్యాలెన్స్ ఎంత')">
+            <i class="fa-solid fa-wallet text-amber"></i> బ్యాలెన్స్ వివరాలు
+          </button>
+          <button type="button" class="voice-prompt-chip" onclick="executeVoiceCommandQuery('స్టాక్ వివరాలు')">
+            <i class="fa-solid fa-cubes text-purple"></i> స్టాక్ సమాచారం
+          </button>
+          <button type="button" class="voice-prompt-chip" onclick="executeVoiceCommandQuery('వాట్సాప్ స్టేటస్')">
+            <i class="fa-brands fa-whatsapp text-emerald"></i> వాట్సాప్ స్టేటస్
+          </button>
+        </div>
+      </div>
+
+      <div class="telugu-voice-footer">
+        <div class="voice-lang-switch">
+          <span>భాష:</span>
+          <button type="button" id="btn-lang-te" class="voice-lang-btn active" onclick="setVoiceAssistantLang('te-IN')">తెలుగు</button>
+          <button type="button" id="btn-lang-en" class="voice-lang-btn" onclick="setVoiceAssistantLang('en-IN')">English</button>
+        </div>
+
+        <button type="button" id="voice-main-mic-btn" class="voice-action-btn-main" onclick="toggleVoiceListening()" title="Start / Stop Listening">
+          <i class="fa-solid fa-microphone" id="voice-main-mic-icon"></i>
+        </button>
+
+        <button type="button" class="btn btn-secondary btn-sm" onclick="replayLastVoiceResponse()" title="Re-speak Response">
+          <i class="fa-solid fa-volume-high"></i> మళ్ళీ వినండి
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- DOCKED MOBILE BOTTOM NAVIGATION BAR -->
   <nav class="mobile-bottom-nav no-print" id="mobile-bottom-nav" aria-label="Mobile Navigation">
     <button type="button" class="mobile-bottom-nav-item active" data-bottom-tab="dashboard" onclick="switchTab('dashboard')">
@@ -4168,7 +4250,7 @@
     </button>
   </nav>
 
-  <script src="index_v5.js?v=405_whatsapp_pdf_guaranteed"></script>
+  <script src="index_v5.js?v=406_telugu_ai_whatsapp_pdf"></script>
 </body>
 </html>
 

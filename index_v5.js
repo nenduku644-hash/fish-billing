@@ -15325,5 +15325,355 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// ============================================================================
+// TELUGU VOICE AI ASSISTANT (తెలుగు వాయిస్ అసిస్టెంట్ & స్పీచ్ ఇంజిన్)
+// ============================================================================
+(function() {
+  let recognition = null;
+  let isListening = false;
+  let currentLang = 'te-IN'; // Default Telugu
+  let lastSpokenText = '';
+  let speechSynth = window.speechSynthesis || null;
+
+  // Initialize Web Speech API Recognition
+  function initSpeechRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      console.warn("Speech Recognition API is not supported in this browser.");
+      return null;
+    }
+    const rec = new SpeechRecognition();
+    rec.continuous = false;
+    rec.interimResults = true;
+    rec.lang = currentLang;
+
+    rec.onstart = function() {
+      isListening = true;
+      updateVoiceUIState('listening');
+    };
+
+    rec.onresult = function(event) {
+      let interim = '';
+      let final = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          final += event.results[i][0].transcript;
+        } else {
+          interim += event.results[i][0].transcript;
+        }
+      }
+      const transcriptEl = document.getElementById("voice-user-transcript");
+      if (transcriptEl) {
+        transcriptEl.textContent = final || interim || "...";
+      }
+      if (final) {
+        rec.stop();
+        window.executeVoiceCommandQuery(final.trim());
+      }
+    };
+
+    rec.onerror = function(event) {
+      console.warn("Voice Recognition error:", event.error);
+      isListening = false;
+      updateVoiceUIState('idle');
+      const badgeText = document.getElementById("voice-status-text");
+      if (badgeText) {
+        badgeText.textContent = event.error === 'no-speech' 
+          ? "మాట వినపడలేదు, మళ్ళీ ప్రయత్నించండి (No speech detected)" 
+          : "మైక్రోఫోన్ లోపం (" + event.error + ")";
+      }
+    };
+
+    rec.onend = function() {
+      isListening = false;
+      updateVoiceUIState('idle');
+    };
+
+    return rec;
+  }
+
+  function updateVoiceUIState(state) {
+    const visualizer = document.getElementById("voice-wave-visualizer");
+    const badge = document.getElementById("voice-status-badge");
+    const badgeText = document.getElementById("voice-status-text");
+    const mainMicBtn = document.getElementById("voice-main-mic-btn");
+    const navPill = document.getElementById("live-telugu-voice-pill");
+
+    if (state === 'listening') {
+      if (visualizer) visualizer.classList.add("active");
+      if (badge) {
+        badge.className = "voice-status-badge listening";
+      }
+      if (badgeText) badgeText.textContent = "వింటున్నాను... మాట్లాడండి (Listening... Speak now)";
+      if (mainMicBtn) mainMicBtn.classList.add("listening");
+      if (navPill) navPill.classList.add("listening");
+    } else if (state === 'speaking') {
+      if (visualizer) visualizer.classList.add("active");
+      if (badge) {
+        badge.className = "voice-status-badge speaking";
+      }
+      if (badgeText) badgeText.textContent = "సమాధానం చెబుతున్నాను (Speaking response...)";
+      if (mainMicBtn) mainMicBtn.classList.remove("listening");
+      if (navPill) navPill.classList.remove("listening");
+    } else {
+      if (visualizer) visualizer.classList.remove("active");
+      if (badge) {
+        badge.className = "voice-status-badge";
+      }
+      if (badgeText) badgeText.textContent = "మైక్ బటన్ నొక్కి మాట్లాడండి (Tap Mic to Speak)";
+      if (mainMicBtn) mainMicBtn.classList.remove("listening");
+      if (navPill) navPill.classList.remove("listening");
+    }
+  }
+
+  window.toggleTeluguVoiceAssistant = function() {
+    const modal = document.getElementById("telugu-voice-modal");
+    if (!modal) return;
+    const isHidden = modal.classList.contains("hidden");
+    if (isHidden) {
+      modal.classList.remove("hidden");
+      if (typeof playSubtleClickAudio === "function") playSubtleClickAudio();
+      window.toggleVoiceListening(true);
+    } else {
+      modal.classList.add("hidden");
+      if (recognition && isListening) {
+        try { recognition.stop(); } catch (e) {}
+      }
+      if (speechSynth && speechSynth.speaking) {
+        try { speechSynth.cancel(); } catch (e) {}
+      }
+    }
+  };
+
+  window.setVoiceAssistantLang = function(lang) {
+    currentLang = lang || 'te-IN';
+    const btnTe = document.getElementById("btn-lang-te");
+    const btnEn = document.getElementById("btn-lang-en");
+    if (btnTe) btnTe.classList.toggle("active", currentLang === 'te-IN');
+    if (btnEn) btnEn.classList.toggle("active", currentLang === 'en-IN');
+    if (recognition) {
+      recognition.lang = currentLang;
+    }
+    const welcome = currentLang === 'te-IN'
+      ? "భాష తెలుగులోకి మార్చబడింది. మీ ప్రశ్నను అడగండి."
+      : "Language switched to English. Please ask your query.";
+    window.speakTeluguResponse(welcome);
+  };
+
+  window.toggleVoiceListening = function(forceStart = false) {
+    if (!recognition) {
+      recognition = initSpeechRecognition();
+    }
+    if (!recognition) {
+      alert("మీ బ్రౌజర్‌లో వాయిస్ రికగ్నిషన్ సపోర్ట్ లేదు. దయచేసి Chrome లేదా Edge బ్రౌజర్ ఉపయోగించండి.");
+      return;
+    }
+
+    if (isListening && !forceStart) {
+      try { recognition.stop(); } catch (e) {}
+      isListening = false;
+      updateVoiceUIState('idle');
+    } else {
+      if (speechSynth && speechSynth.speaking) {
+        try { speechSynth.cancel(); } catch (e) {}
+      }
+      recognition.lang = currentLang;
+      try {
+        recognition.start();
+      } catch (err) {
+        console.warn("Recognition start note:", err.message);
+      }
+    }
+  };
+
+  window.speakTeluguResponse = function(text) {
+    lastSpokenText = text;
+    const responseEl = document.getElementById("voice-ai-response");
+    if (responseEl) {
+      responseEl.textContent = text;
+    }
+
+    if (!speechSynth) return;
+    try {
+      speechSynth.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 0.95;
+      utterance.pitch = 1.0;
+
+      const voices = speechSynth.getVoices ? speechSynth.getVoices() : [];
+      let matchedVoice = null;
+      if (currentLang === 'te-IN') {
+        matchedVoice = voices.find(v => v.lang === 'te-IN' || v.lang === 'te_IN' || (v.name && v.name.toLowerCase().includes('telugu')));
+      }
+      if (!matchedVoice) {
+        matchedVoice = voices.find(v => v.lang === 'en-IN' || (v.name && v.name.toLowerCase().includes('india')));
+      }
+      if (matchedVoice) {
+        utterance.voice = matchedVoice;
+      }
+      utterance.lang = currentLang === 'te-IN' ? 'te-IN' : 'en-IN';
+
+      utterance.onstart = function() {
+        updateVoiceUIState('speaking');
+      };
+      utterance.onend = function() {
+        updateVoiceUIState('idle');
+      };
+      utterance.onerror = function() {
+        updateVoiceUIState('idle');
+      };
+
+      speechSynth.speak(utterance);
+    } catch (e) {
+      console.warn("Speech synthesis error:", e);
+      updateVoiceUIState('idle');
+    }
+  };
+
+  window.replayLastVoiceResponse = function() {
+    if (lastSpokenText) {
+      window.speakTeluguResponse(lastSpokenText);
+    }
+  };
+
+  window.executeVoiceCommandQuery = function(query) {
+    if (!query) return;
+    const transcriptEl = document.getElementById("voice-user-transcript");
+    if (transcriptEl) {
+      transcriptEl.textContent = query;
+    }
+
+    const q = query.toLowerCase().trim();
+    let responseText = "";
+
+    // 1. SALES TODAY / TODAY INVOICES
+    if (q.includes("సేల్స్") || q.includes("సేల్") || q.includes("ఈ రోజు") || q.includes("ఈరోజు") || q.includes("వ్యాపారం") || q.includes("కలెక్షన్") || q.includes("today") || q.includes("sales") || q.includes("collection")) {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const invoices = (window.invoicesHistory || []);
+      const todayInvoices = invoices.filter(inv => {
+        const invDate = inv.date || (inv.details && inv.details.invoiceDate) || "";
+        return String(invDate).startsWith(todayStr);
+      });
+
+      let totalSales = 0;
+      let totalPaid = 0;
+      todayInvoices.forEach(inv => {
+        const d = inv.details || inv;
+        totalSales += Number(d.grandTotal || d.total || inv.grandTotal || 0);
+        totalPaid += Number(d.paidAmount || inv.paidAmount || 0);
+      });
+
+      if (currentLang === 'te-IN') {
+        if (todayInvoices.length === 0) {
+          responseText = `ఈ రోజు ఇంకా ఎలాంటి ఇన్వాయిస్‌లు నమోదు కాలేదు. కొత్త బిల్లు రాయడానికి సిద్ధంగా ఉన్నాను.`;
+        } else {
+          responseText = `ఈ రోజు మొత్తం ${todayInvoices.length} ఇన్వాయిస్‌లు నమోదయ్యాయి. మొత్తం వ్యాపారం ₹ ${Math.round(totalSales).toLocaleString('en-IN')} రూపాయలు. వసూలైన మొత్తం ₹ ${Math.round(totalPaid).toLocaleString('en-IN')} రూపాయలు.`;
+        }
+      } else {
+        responseText = `Today there are ${todayInvoices.length} invoices. Total sales amount is ₹ ${Math.round(totalSales).toLocaleString('en-IN')}, and collected amount is ₹ ${Math.round(totalPaid).toLocaleString('en-IN')}.`;
+      }
+    }
+    // 2. NEW BILL / CREATE INVOICE
+    else if (q.includes("కొత్త") || q.includes("బిల్లు") || q.includes("ఇన్వాయిస్ రాయి") || q.includes("బిల్") || q.includes("new bill") || q.includes("create bill") || q.includes("new invoice")) {
+      if (typeof switchTab === 'function') {
+        switchTab('billing');
+      }
+      setTimeout(() => {
+        const custInput = document.getElementById("customer-name");
+        if (custInput) custInput.focus();
+      }, 400);
+
+      if (currentLang === 'te-IN') {
+        responseText = `కొత్త బిల్లింగ్ ఫారమ్ తెరవబడింది. కస్టమర్ వివరాలు నమోదు చేయండి.`;
+      } else {
+        responseText = `New billing form is opened. Please enter customer details.`;
+      }
+    }
+    // 3. CUSTOMER BALANCE / OUTSTANDING
+    else if (q.includes("బ్యాలెన్స్") || q.includes("బకాయి") || q.includes("బాకీ") || q.includes("balance") || q.includes("outstanding") || q.includes("pending")) {
+      const invoices = (window.invoicesHistory || []);
+      let totalPending = 0;
+      let pendingCount = 0;
+      invoices.forEach(inv => {
+        const d = inv.details || inv;
+        const bal = Number(d.balanceDue || inv.balanceDue || 0);
+        if (bal > 0) {
+          totalPending += bal;
+          pendingCount++;
+        }
+      });
+
+      if (currentLang === 'te-IN') {
+        responseText = `మొత్తం ${pendingCount} బిల్లులకు గాను పెండింగ్ బ్యాలెన్స్ ₹ ${Math.round(totalPending).toLocaleString('en-IN')} రూపాయలు ఉంది.`;
+      } else {
+        responseText = `Total pending balance across ${pendingCount} bills is ₹ ${Math.round(totalPending).toLocaleString('en-IN')}.`;
+      }
+    }
+    // 4. STOCK / PRODUCTS
+    else if (q.includes("స్టాక్") || q.includes("ప్రొడక్ట్") || q.includes("రాలిమిన్") || q.includes("stock") || q.includes("product") || q.includes("inventory")) {
+      const products = window.products || window.allProducts || [];
+      if (typeof switchTab === 'function') {
+        switchTab('products');
+      }
+      if (currentLang === 'te-IN') {
+        responseText = `మొత్తం ${products.length} రకాల ఉత్పత్తులు అందుబాటులో ఉన్నాయి. స్టాక్ స్క్రీన్ తెరవబడింది.`;
+      } else {
+        responseText = `There are ${products.length} products available. Products catalog is opened.`;
+      }
+    }
+    // 5. WHATSAPP STATUS
+    else if (q.includes("వాట్సాప్") || q.includes("whatsapp") || q.includes("bot")) {
+      const statusPill = document.getElementById("live-whatsapp-pill");
+      const isConnected = statusPill && statusPill.classList.contains("connected");
+      if (currentLang === 'te-IN') {
+        responseText = isConnected
+          ? `వాట్సాప్ బాట్ విజయవంతంగా కనెక్ట్ అయి ఉంది. ఇన్వాయిస్ పిడిఎఫ్ లు ఆటోమేటిక్‌గా వెళ్తాయి.`
+          : `వాట్సాప్ బాట్ ఇంకా కనెక్ట్ కాలేదు. దయచేసి వాట్సాప్ బటన్ పై క్లిక్ చేసి క్యూఆర్ కోడ్ స్కాన్ చేయండి.`;
+      } else {
+        responseText = isConnected
+          ? `WhatsApp Bot is active and connected. PDF invoices will dispatch automatically.`
+          : `WhatsApp Bot is currently disconnected. Please click WhatsApp icon to link your device.`;
+      }
+    }
+    // 6. GENERAL SEARCH (Invoice # or Customer)
+    else {
+      const invoices = (window.invoicesHistory || []);
+      const numMatch = q.match(/\d+/);
+      if (numMatch) {
+        const searchedNum = numMatch[0].padStart(4, '0');
+        if (typeof switchTab === 'function') {
+          switchTab('history');
+        }
+        const searchInput = document.getElementById("invoice-search-input");
+        if (searchInput) {
+          searchInput.value = searchedNum;
+          searchInput.dispatchEvent(new Event('input'));
+        }
+        if (currentLang === 'te-IN') {
+          responseText = `ఇన్వాయిస్ నంబర్ ${searchedNum} కొరకు శోధించాను. వివరాలు స్క్రీన్‌పై ఉన్నాయి.`;
+        } else {
+          responseText = `Searched for invoice number ${searchedNum}. Details are shown on screen.`;
+        }
+      } else {
+        if (currentLang === 'te-IN') {
+          responseText = `మీరు "${query}" అని అడిగారు. సహాయం కొరకు "ఈ రోజు సేల్స్", "కొత్త బిల్లు", లేదా "స్టాక్ వివరాలు" అని అడగండి.`;
+        } else {
+          responseText = `You asked "${query}". You can ask "today sales", "new bill", or "stock details".`;
+        }
+      }
+    }
+
+    window.speakTeluguResponse(responseText);
+  };
+
+  // Keyboard shortcut: Alt+V toggles Telugu Voice Assistant
+  document.addEventListener('keydown', function(e) {
+    if (e.altKey && (e.key === 'v' || e.key === 'V')) {
+      e.preventDefault();
+      window.toggleTeluguVoiceAssistant();
+    }
+  });
+})();
+
 
 
