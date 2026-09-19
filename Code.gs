@@ -1117,6 +1117,26 @@ function handleApiGet(e) {
     })).setMimeType(ContentService.MimeType.JSON);
   }
 
+function computeSyncDataHash(invs, prods, parts) {
+  var str = (invs ? invs.length : 0) + '|' + (prods ? prods.length : 0) + '|' + (parts ? parts.length : 0);
+  if (invs && invs.length > 0) {
+    var lastInv = invs[invs.length - 1];
+    str += '|' + (lastInv.id || lastInv.invoiceNo || '') + '|' + (lastInv.updatedAt || lastInv.invoiceDate || '');
+  }
+  if (prods && prods.length > 0) {
+    str += '|' + (prods[0].stock || 0) + '|' + (prods[prods.length - 1].stock || 0);
+  }
+  var hash = 0x811c9dc5;
+  for (var i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function handleApiGet(e) {
+  var action = (e && e.parameter && e.parameter.action) ? String(e.parameter.action).trim() : "status";
+
   // 1. Status Health Check
   if (action === "status") {
     return ContentService.createTextOutput(JSON.stringify({
@@ -1127,25 +1147,14 @@ function handleApiGet(e) {
     })).setMimeType(ContentService.MimeType.JSON);
   }
 
-  // 2. Authoritative Sync / Pull from Google Sheets
+  // 2. Authoritative Sync / Pull from Google Sheets with Fast Delta Validation
   if (action === "sync" || action === "pull") {
     var auth = authenticateRequest(e, null);
     if (!auth.ok) {
       return ContentService.createTextOutput(JSON.stringify(auth)).setMimeType(ContentService.MimeType.JSON);
     }
 
-    // High-speed RAM cache check
-    var cache = CacheService.getScriptCache();
-    var cachedBundle = null;
-    try {
-      var bundleStr = cache.get("cache_sync_bundle");
-      if (bundleStr) cachedBundle = JSON.parse(bundleStr);
-    } catch (err) {}
-
-    if (cachedBundle) {
-      cachedBundle.serverTime = Date.now();
-      return ContentService.createTextOutput(JSON.stringify(cachedBundle)).setMimeType(ContentService.MimeType.JSON);
-    }
+    var clientHash = e && e.parameter && e.parameter.hash ? String(e.parameter.hash).trim() : "";
 
     // Read Authoritative Data directly from Google Sheets
     var ssMaster = getMasterSpreadsheet();
@@ -1153,8 +1162,21 @@ function handleApiGet(e) {
     var prods = readInventoryFromSheet(ssMaster);
     var parts = readCustomersFromSheet(ssMaster);
 
+    var serverHash = computeSyncDataHash(invs, prods, parts);
+
+    // If client data matches server hash, return ultra-lightweight notModified response (< 50 bytes)
+    if (clientHash && clientHash === serverHash) {
+      return ContentService.createTextOutput(JSON.stringify({
+        ok: true,
+        notModified: true,
+        hash: serverHash,
+        serverTime: Date.now()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
     var fullBundle = {
       ok: true,
+      hash: serverHash,
       invoices: invs,
       products: prods,
       parties: parts,
@@ -1163,13 +1185,6 @@ function handleApiGet(e) {
       serverTime: Date.now(),
       timestamp: new Date().toISOString()
     };
-
-    try {
-      var bundleJson = JSON.stringify(fullBundle);
-      if (bundleJson.length < 95000) {
-        cache.put("cache_sync_bundle", bundleJson, 21600);
-      }
-    } catch (cacheErr) {}
 
     return ContentService.createTextOutput(JSON.stringify(fullBundle)).setMimeType(ContentService.MimeType.JSON);
   }
@@ -1210,8 +1225,20 @@ function handleApiPost(e) {
       var invs = readInvoicesFromSheet(ss);
       var prods = readInventoryFromSheet(ss);
       var parts = readCustomersFromSheet(ss);
+      var sHash = computeSyncDataHash(invs, prods, parts);
+
+      if (data.hash && data.hash === sHash) {
+        return ContentService.createTextOutput(JSON.stringify({
+          ok: true,
+          notModified: true,
+          hash: sHash,
+          serverTime: Date.now()
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+
       return ContentService.createTextOutput(JSON.stringify({
         ok: true,
+        hash: sHash,
         invoices: invs,
         products: prods,
         parties: parts,
